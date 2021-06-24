@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+require 'fileutils'
 require 'nokogiri'
 require 'optparse'
 
@@ -213,13 +214,13 @@ def load_fn_defs(reg, req_fns)
 end
 
 def generate_header(out_dir, fns)
-    out_file = File.open(out_dir + "/aglet.h", 'w')
+    out_file = File.open("#{out_dir}/aglet.h", 'w')
 
     out_file << H_HEADER
 end
 
 def generate_loader_source(out_dir, fns)
-    out_file = File.open(out_dir + "/aglet_loader.c", 'w')
+    out_file = File.open("#{out_dir}/aglet_loader.c", 'w')
 
     load_code = ''
 
@@ -233,7 +234,7 @@ def generate_loader_source(out_dir, fns)
 end
 
 def generate_trampolines(out_dir, fns)
-    out_file = File.open(out_dir + "/aglet_trampolines.s", 'w')
+    out_file = File.open("#{out_dir}/aglet_trampolines.s", 'w')
 
     out_file << TRAMPOLINES_HEADER
 
@@ -251,8 +252,15 @@ req_fns = get_requested_fn_names(reg, args[:profile])
 fn_defs = load_fn_defs(reg, req_fns)
 
 header_out_path = args[:header_output]
-src_out_path = args[:source_output]
+source_out_path = args[:source_output]
+
+FileUtils.mkdir_p header_out_path
+FileUtils.mkdir_p source_out_path
 
 generate_header(header_out_path, fn_defs)
-generate_loader_source(src_out_path, fn_defs)
-generate_trampolines(src_out_path, fn_defs)
+generate_loader_source(source_out_path, fn_defs)
+generate_trampolines(source_out_path, fn_defs)
+
+# copy glext.h, ideally we should generate this in-house eventually
+FileUtils.mkdir_p "#{header_out_path}/GL"
+FileUtils.cp("#{__dir__}/specs/EGL-Registry/api/GL/glext.h", "#{header_out_path}/GL/glext.h")
