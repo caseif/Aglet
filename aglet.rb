@@ -3,7 +3,7 @@
 require 'nokogiri'
 require 'optparse'
 
-GL_REGISTRY_PATH = "#{__dir__}/specs/OpenGL-Registry/xml/gl.xml"
+GL_REGISTRY_PATH = "#{__dir__}/specs/EGL-Registry/xml/gl.xml"
 
 GL_PROC_TYPE = "GLFWglproc"
 GL_LOOKUP_FN = "glfwGetProcAddress"
@@ -11,15 +11,31 @@ ADDR_ARR = 'opengl_fn_addrs'
 
 ASM_COMMENT_PREFIX = '# '
 
-C_HEADER =
+H_HEADER =
 '/* Auto-generated file; do not modify! */
 
-#define GL_GLEXT_PROTOTYPES
+#pragma once
 
-#include "GLFW/glfw3.h"
+#include "GL/gl.h"
+#define GL_GLEXT_PROTOTYPES
+#include "GL/glext.h"
+
+#define GLFW_INCLUDE_NONE
+
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+bool agletLoad(void);
+
+#ifdef __cplusplus
+}
+#endif
 '
 
-ASM_HEADER =
+TRAMPOLINES_HEADER =
 ASM_COMMENT_PREFIX + 'Auto-generated file; do not modify!
 
 .intel_syntax noprefix
@@ -28,19 +44,40 @@ ASM_COMMENT_PREFIX + 'Auto-generated file; do not modify!
 .text
 '
 
-ASM_FN_TEMPLATE_X64 =
+TRAMPLINE_TEMPLATE_AMD64 =
 '.global %{name}
 %{name}:
     movq r11, [' + ADDR_ARR + '@GOTPCREL[rip]]
     jmp [r11]+%{index}*8
 '
 
-INIT_CODE_GLOBAL =
-"#{GL_PROC_TYPE} #{ADDR_ARR}[%d];
+LOADER_TEMPLATE =
+"/* Auto-generated file; do not modify! */
 
-void agletLoad() {
+#include <GL/gl.h>
+#define GL_GLEXT_PROTOTYPES
+#include <GL/glext.h>
+
+#define GLFW_INCLUDE_NONE
+#include \"GLFW/glfw3.h\"
+
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern \"C\" {
+#endif
+
+#{GL_PROC_TYPE} #{ADDR_ARR}[%d];
+
+bool agletLoad() {
 %s
+
+return true;
 }
+
+#ifdef __cplusplus
+}
+#endif
 "
 
 class FnParam
@@ -79,18 +116,22 @@ end
 def parse_args()
     options = {}
     OptionParser.new do |opts|
-        opts.banner = "Usage: aglet.rb -p <profile> -o <output dir>"
+        opts.banner = "Usage: aglet.rb -p <profile> -h <output dir>"
 
         opts.on('-p PROFILE', '--profile=PROFILE', 'Path to profile file') do |p|
             options[:profile] = p
         end
-        opts.on('-o OUTPUT', '--output=OUTPUT', 'Path to output directory') do |o|
-            options[:output] = o
+        opts.on('-h HEADER OUTPUT', '--header-out=HEADER OUTPUT', 'Path to header output directory') do |h|
+            options[:header_output] = h
+        end
+        opts.on('-s SOURCE OUTPUT', '--source-out=SOURCE OUTPUT', 'Path to source output directory') do |s|
+            options[:source_output] = s
         end
     end.parse!
 
     raise "Profile path is required" unless options[:profile]
-    raise "Output path is required" unless options[:output]
+    raise "Header output path is required" unless options[:header_output]
+    raise "Source output path is required" unless options[:source_output]
 
     options
 end
@@ -171,30 +212,35 @@ def load_fn_defs(reg, req_fns)
     fns
 end
 
-def write_src_file(out_cpp, out_s, fns, per_context)
-    out_cpp << CPP_HEADER
-    out_cpp << "\n"
+def generate_header(out_dir, fns)
+    out_file = File.open(out_dir + "/aglet.h", 'w')
 
-    out_s << ASM_HEADER
+    out_file << H_HEADER
+end
 
-    init_code = ''
-    decl_code = ''
+def generate_loader_source(out_dir, fns)
+    out_file = File.open(out_dir + "/aglet_loader.c", 'w')
+
+    load_code = ''
 
     fns.each_with_index do |fn, i|
-        init_code << "        #{ADDR_ARR}[#{i}] = #{GL_LOOKUP_FN}(\"#{fn.name}\");\n"
-
-        typed_params = fn.params.join ', '
-        untyped_params = fn.params.map { |p| p.name }.join ', '
-
-        decl_code << "\n"
-        decl_code << ASM_FN_TEMPLATE_X64 % [name: fn.name, index: i]
+        load_code << "\n        #{ADDR_ARR}[#{i}] = #{GL_LOOKUP_FN}(\"#{fn.name}\");"
     end
 
-    init_code.delete_suffix! "\n"
+    load_code.delete_suffix! "\n"
 
-    out_cpp << INIT_CODE_GLOBAL % [fns.size, init_code]
+    out_file << LOADER_TEMPLATE % [fns.size, load_code]
+end
 
-    out_s << decl_code
+def generate_trampolines(out_dir, fns)
+    out_file = File.open(out_dir + "/aglet_trampolines.s", 'w')
+
+    out_file << TRAMPOLINES_HEADER
+
+    fns.each_with_index do |fn, i|
+        out_file << "\n"
+        out_file << TRAMPLINE_TEMPLATE_AMD64 % [name: fn.name, index: i]
+    end
 end
 
 args = parse_args
@@ -204,8 +250,9 @@ reg = File.open(GL_REGISTRY_PATH) { |f| Nokogiri::XML(f) }
 req_fns = get_requested_fn_names(reg, args[:profile])
 fn_defs = load_fn_defs(reg, req_fns)
 
-out_dir_path = args[:output]
-out_cpp = File.open(out_dir_path + "/aglet.c", 'w')
-out_s = File.open(out_dir_path + "/aglet.s", 'w')
+header_out_path = args[:header_output]
+src_out_path = args[:source_output]
 
-write_src_file(out_cpp, out_s, fn_defs, false)
+generate_header(header_out_path, fn_defs)
+generate_loader_source(src_out_path, fn_defs)
+generate_trampolines(src_out_path, fn_defs)
