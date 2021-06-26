@@ -3,4 +3,4 @@
 	url = git@github.com:KhronosGroup/OpenGL-Registry.git
 [submodule "specs/EGL-Registry"]
 	path = specs/EGL-Registry
-	url = git@github.com:KhronosGroup/OpenGL-Registry.git
+	url = git@github.com:KhronosGroup/EGL-Registry.git
