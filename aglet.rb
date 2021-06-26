@@ -165,17 +165,17 @@ class GLDefs
 end
 
 class GLProfile
-    def initialize(api, version, core, type_names, enum_names, fn_names)
+    def initialize(api, base_api, version, type_names, enum_names, fn_names)
         @api = api
+        @base_api = base_api
         @version = version
-        @core = core
         @type_names = type_names
         @enum_names = enum_names
         @fn_names = fn_names
     end
     attr_reader :api
+    attr_reader :base_api
     attr_reader :version
-    attr_reader :core
     attr_reader :type_names
     attr_reader :enum_names
     attr_reader :fn_names
@@ -211,21 +211,21 @@ def load_profile(reg, profile_path)
 
     profile = File.open(profile_path) { |f| Nokogiri::XML(f) }
     profile_api = profile.xpath('//profile/api/text()').text
-    profile_core = profile.xpath('//profile/core/text()').text
+    profile_api_base = profile_api == 'glcore' ? 'gl' : profile_api
     profile_version = profile.xpath('//profile//apiVersion/text()').text
 
     req_major, req_minor = profile_version.split('.')
 
-    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile_api)
+    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile_api_base)
     gl_feature_spec.each do |ver|
         feature_number = ver.xpath('@number').text
         feature_major, feature_minor = feature_number.split('.')
         next if feature_major > req_major or (feature_major == req_major and feature_minor > req_minor)
 
-        if profile_core
+        if profile_api == 'glcore'
             require_secs = ver.css("require:not([profile]), require[profile='core']")
             remove_secs = ver.css("remove:not([profile]), remove[profile='core']")
-        else
+        elsif profile_api == 'gl'
             require_secs = ver.css("require:not([profile]), require[profile='compatibility']")
             remove_secs = ver.css("remove:not([profile]), remove[profile='compatibility']")
         end
@@ -241,25 +241,23 @@ def load_profile(reg, profile_path)
 
     profile_extensions = profile.xpath('//profile//extensions//extension/text()').map { |e| e.text }
 
-    support_api = profile_api.dup
-    support_api.concat 'core' if support_api == 'gl' and profile_core
-
     reg.xpath('//registry//extensions//extension').each do |ext|
-        supported = ext.xpath('@supported').text
-        next unless supported == nil or supported.split('|').include? profile_api
-
         ext_name = ext.xpath('@name').text
         next unless profile_extensions.include? ext_name
+
+        supported = ext.xpath('@supported').text
+        if supported != nil and not supported.split('|').include? profile_api
+            raise "Extension #{ext_name} is not supported by the selected API (#{profile_api})"
+        end
 
         require_fns += ext.xpath('.//require//command/@name').map { |n| n.text }
         require_fns -= ext.xpath('.//remove//command/@name').map { |n| n.text }
     end
 
-    fmt_version = profile_version + (profile_core ? ' (core)' : '')
-    print "Finished discovering members for profile \"#{profile_api} #{fmt_version}\""
+    print "Finished discovering members for profile \"#{profile_api} #{profile_version}\""
     print " (#{require_types.length} types, #{require_enums.length} enums, #{require_fns.length} functions)\n"
 
-    return GLProfile.new(profile_api, profile_version, profile_core, require_types.to_set, require_enums.to_set, require_fns.to_set)
+    return GLProfile.new(profile_api, profile_api_base, profile_version, require_types.to_set, require_enums.to_set, require_fns.to_set)
 end
 
 def parse_param_type(raw)
@@ -328,7 +326,7 @@ def load_gl_members(reg, profile_path)
         enum_name = enum_root.xpath('./@name').text
         enum_group = enum_root.xpath('./@group').text
         enum_value = enum_root.xpath('./@value').text
-        next if enum_api = enum_root.at_xpath('./@api') and enum_api != profile.api
+        next if enum_api = enum_root.at_xpath('./@api') and enum_api != profile.base_api
 
         enums << GLEnum.new(enum_name, enum_group, enum_value)
     end
