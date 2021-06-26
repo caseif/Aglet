@@ -3,11 +3,10 @@
 require 'fileutils'
 require 'nokogiri'
 require 'optparse'
+require 'set'
 
 GL_REGISTRY_PATH = "#{__dir__}/specs/OpenGL-Registry/xml/gl.xml"
 
-GL_PROC_TYPE = "GLFWglproc"
-GL_LOOKUP_FN = "glfwGetProcAddress"
 ADDR_ARR = 'opengl_fn_addrs'
 
 ASM_COMMENT_PREFIX = '# '
@@ -21,17 +20,35 @@ H_HEADER =
 extern "C" {
 #endif
 
-#ifdef GL_GLEXT_VERSION
+#if defined(__gl_h_)
+#error "gl.h must not be included alongside aglet.h"
+#endif
+
+#if defined(GL_GLEXT_VERSION) || defined(__gl_glext_h_)
 #error "glext.h must not be included alongside aglet.h"
 #endif
 
 #define GLFW_INCLUDE_NONE
 
+#ifndef APIENTRY
+#if defined(_WIN32) && !defined(APIENTRY) && !defined(__CYGWIN__) && !defined(__SCITECH_SNAP__)
+#define APIENTRY __stdcall
+#else
+#define APIENTRY
+#endif
+#endif
+
+#ifndef APIENTRYP
+#define APIENTRYP APIENTRY *
+#endif
+
+typedef void *(*AgletLoadProc)(const char *name);
+
 #include <stdbool.h>
 '
 
 H_FOOTER =
-'bool agletLoad(void);
+'bool agletLoad(AgletLoadProc load_proc_fn);
 
 #ifdef __cplusplus
 }
@@ -65,9 +82,9 @@ LOADER_TEMPLATE =
 extern \"C\" {
 #endif
 
-#{GL_PROC_TYPE} #{ADDR_ARR}[%d];
+void *#{ADDR_ARR}[%d];
 
-bool agletLoad() {
+bool agletLoad(AgletLoadProc load_proc_fn) {
 %s
 
     return true;
@@ -87,7 +104,7 @@ class FnParam
     attr_reader :type
 
     def gen_c()
-        return "#{@type} #{@name}"
+        return "#{@type} #{@name}".gsub('* ', ' *')
     end
 end
 
@@ -102,7 +119,8 @@ class GLFunction
     attr_reader :params
 
     def gen_c()
-        fn_def = "#{@ret_type} #{@name}(#{params.join ', '})"
+        fn_name_and_ret = "#{@ret_type} #{@name}".gsub('* ', ' *')
+        fn_def = "APIENTRY #{fn_name_and_ret}(#{params.map { |p| p.gen_c }.join(', ')})"
         return fn_def
     end
 end
@@ -146,6 +164,23 @@ class GLDefs
     attr_reader :fns
 end
 
+class GLProfile
+    def initialize(api, version, core, type_names, enum_names, fn_names)
+        @api = api
+        @version = version
+        @core = core
+        @type_names = type_names
+        @enum_names = enum_names
+        @fn_names = fn_names
+    end
+    attr_reader :api
+    attr_reader :version
+    attr_reader :core
+    attr_reader :type_names
+    attr_reader :enum_names
+    attr_reader :fn_names
+end
+
 def params_to_str(params)
     params.join(', ')
 end
@@ -169,7 +204,7 @@ def parse_args()
     options
 end
 
-def get_requested_fn_names(reg, profile_path)
+def load_profile(reg, profile_path)
     require_types = []
     require_enums = []
     require_fns = []
@@ -221,58 +256,134 @@ def get_requested_fn_names(reg, profile_path)
     end
 
     fmt_version = profile_version + (profile_core ? ' (core)' : '')
-    print "Found #{require_fns.length} functions for profile \"#{profile_api} #{fmt_version}\"\n"
+    print "Finished discovering members for profile \"#{profile_api} #{fmt_version}\""
+    print " (#{require_types.length} types, #{require_enums.length} enums, #{require_fns.length} functions)\n"
 
-    return require_fns
+    return GLProfile.new(profile_api, profile_version, profile_core, require_types.to_set, require_enums.to_set, require_fns.to_set)
 end
 
 def parse_param_type(raw)
-    raw.gsub(/<name>.*<\/name>/, '').gsub(/<\/?ptype>/, '')
+    raw.gsub(/<name>.*<\/name>/, '').gsub(/<\/?ptype>/, '').gsub('* ', ' *')
 end
 
 def load_gl_members(reg, profile_path)
+    types = []
+    enums = []
     fns = []
 
-    req_fns = get_requested_fn_names(reg, profile_path)
+    profile = load_profile(reg, profile_path)
 
-    reg.xpath("//registry//commands//command").each do |cmd_root|
+    req_fns = profile.fn_names
+
+    extra_types = Set[]
+
+    # discover commands first because they can implicitly require extra types
+    reg.xpath('//registry//commands//command').each do |cmd_root|
         cmd_name = cmd_root.xpath('.//proto//name')
 
         next unless req_fns.include? cmd_name.text
 
         name = cmd_name.text.strip
 
-        ret = parse_param_type cmd_root.xpath('.//proto').inner_html
+        proto = cmd_root.xpath('.//proto')
+        ret = parse_param_type proto.inner_html
+        ret.gsub!(' *', '* ')
         ret.strip!
+
+        if ptype = proto.at_xpath('.//ptype')
+            extra_types << ptype.text
+        end
 
         params = []
 
         cmd_root.xpath('.//param').each do |cmd_param|
+            if ptype = cmd_param.at_xpath('.//ptype')
+                extra_types << ptype.text
+            end
+
             param_name = cmd_param.xpath('.//name').text
             param_type = parse_param_type cmd_param.inner_html
-            params << FnParam.new(param_name.strip, param_type.strip)
+            param_type.gsub!(' *', '* ')
+            param_type.strip!
+            params << FnParam.new(param_name.strip, param_type)
         end
 
         fns << GLFunction.new(name, ret, params)
     end
 
-    fns
+    req_types = profile.type_names + extra_types
+
+    print "Discovered #{req_types.length - profile.type_names.length} additional types\n"
+
+    more_types = Set[]
+
+    reg.xpath('//registry//types/type').each do |type_root|
+        type_name = type_root.xpath('.//name').text
+        type_typedef = type_root.text
+
+        types << GLType.new(type_name, type_typedef)
+    end
+
+    reg.xpath('//registry//enums/enum').each do |enum_root|
+        enum_name = enum_root.xpath('./@name').text
+        enum_group = enum_root.xpath('./@group').text
+        enum_value = enum_root.xpath('./@value').text
+        next if enum_api = enum_root.at_xpath('./@api') and enum_api != profile.api
+
+        enums << GLEnum.new(enum_name, enum_group, enum_value)
+    end
+
+    GLDefs.new(types, enums, fns)
 end
 
-def generate_header(out_dir, fns)
+def generate_header(out_dir, defs)
     out_file = File.open("#{out_dir}/aglet.h", 'w')
 
     out_file << H_HEADER
+
+    out_file << "\n"
+
+    defs.types.each do |t|
+        out_file << "#{t.gen_c}\n"
+        if t.typedef =~ /^#include/
+            out_file << "\n"
+        end
+    end
+
+    out_file << "\n"
+
+    defs.enums.group_by { |e| e.group }.each do |name, group|
+        if group != ''
+            out_file << "// enum group #{name}\n"
+        else
+            out_file << "// ungrouped\n"
+        end
+        group.each do |e|
+            out_file << "#{e.gen_c}\n"
+        end
+        out_file << "\n"
+    end
+
+    out_file << "\n"
+
+    defs.fns.each do |fn|
+        out_file << "#{fn.gen_c};\n"
+    end
+
+    out_file << "\n"
+
     out_file << H_FOOTER
 end
 
-def generate_loader_source(out_dir, fns)
+def generate_loader_source(out_dir, defs)
+    fns = defs.fns
+
     out_file = File.open("#{out_dir}/aglet_loader.c", 'w')
 
     load_code = ''
 
     fns.each_with_index do |fn, i|
-        load_code << "    #{ADDR_ARR}[#{i}] = #{GL_LOOKUP_FN}(\"#{fn.name}\");\n"
+        load_code << "    #{ADDR_ARR}[#{i}] = load_proc_fn(\"#{fn.name}\");\n"
     end
 
     load_code.delete_suffix! "\n"
@@ -280,7 +391,9 @@ def generate_loader_source(out_dir, fns)
     out_file << LOADER_TEMPLATE % [fns.size, load_code]
 end
 
-def generate_trampolines_amd64(out_dir, fns)
+def generate_trampolines_amd64(out_dir, defs)
+    fns = defs.fns
+
     out_file = File.open("#{out_dir}/aglet_trampolines.s", 'w')
 
     out_file << TRAMPOLINES_HEADER_AMD64
@@ -295,15 +408,20 @@ args = parse_args
 
 reg = File.open(GL_REGISTRY_PATH) { |f| Nokogiri::XML(f) }
 
-fn_defs = load_gl_members(reg, args[:profile])
+defs = load_gl_members(reg, args[:profile])
 
 out_path = args[:output]
-header_out_path = "#{out_path}/include/aglet"
+base_header_out_path = "#{out_path}/include"
+aglet_header_out_path = "#{base_header_out_path}/aglet"
 source_out_path = "#{out_path}/src"
 
-FileUtils.mkdir_p header_out_path
+FileUtils.mkdir_p aglet_header_out_path
 FileUtils.mkdir_p source_out_path
 
-generate_header(header_out_path, fn_defs)
-generate_loader_source(source_out_path, fn_defs)
-generate_trampolines_amd64(source_out_path, fn_defs)
+generate_header(aglet_header_out_path, defs)
+generate_loader_source(source_out_path, defs)
+generate_trampolines_amd64(source_out_path, defs)
+
+khr_header_out_path = "#{aglet_header_out_path}/KHR"
+FileUtils.mkdir_p khr_header_out_path
+FileUtils.cp("#{__dir__}/specs/EGL-Registry/api/KHR/khrplatform.h", "#{khr_header_out_path}/khrplatform.h")
