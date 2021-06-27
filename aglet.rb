@@ -10,7 +10,7 @@ def indent(str, cols)
     for i in 1..cols
         indent_space << ' '
     end
-    "#{indent_space}#{str.gsub(/\n/, "\n#{indent_space}")}"
+    "#{indent_space}#{str.gsub(/\n(.)/, "\n#{indent_space}\\1")}"
 end
 
 GL_REGISTRY_PATH = "#{__dir__}/specs/OpenGL-Registry/xml/gl.xml"
@@ -112,7 +112,7 @@ static int _load_versions(AgletLoadProc load_proc_fn) {
 static int _load_extensions(AgletLoadProc load_proc_fn) {
     const GLenum(*glGetError)() = load_proc_fn(\"glGetError\");
 
-    #ifdef GL_NUM_EXTENSIONS2
+    #ifdef GL_NUM_EXTENSIONS
     const GLubyte *(*glGetStringi)(GLenum name, GLuint index) = load_proc_fn(\"glGetStringi\");
     void (*glGetIntegerv)(GLenum, GLint*) = load_proc_fn(\"glGetIntegerv\");
     if (glGetStringi != NULL && glGetIntegerv != NULL) {
@@ -169,7 +169,6 @@ static int _load_extensions(AgletLoadProc load_proc_fn) {
 static int _check_required_extensions() {
     bool missing_ext = false;
 %{ext_check_code}
-
     if (missing_ext) {
         return AGLET_ERROR_MISSING_EXTENSION;
     }
@@ -212,7 +211,7 @@ int agletLoad(AgletLoadProc load_proc_fn) {
 "
 
 EXTENSION_MATCH_TEMPLATE_C =
-'if (strncmp(cur_ext, "%{name}", cur_len) == 0) {
+'if (strlen("%{name}") == cur_len && strncmp(cur_ext, "%{name}", cur_len) == 0) {
     AGLET_%{name} = 1;
     continue;
 }
@@ -381,7 +380,7 @@ def load_profile(reg, profile_path)
     end
 
     profile_extensions = profile.xpath('//profile//extensions//extension')
-        .map { |e| GLExtension.new(e.text, e.xpath('./@required')) }
+        .map { |e| GLExtension.new(e.text, e.at_xpath('./@required').to_s.downcase == 'true') }
 
     ext_names = profile_extensions.map { |e| e.name }
 
