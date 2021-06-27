@@ -15,60 +15,9 @@ end
 
 GL_REGISTRY_PATH = "#{__dir__}/specs/OpenGL-Registry/xml/gl.xml"
 
-ADDR_ARR = 'opengl_fn_addrs'
+ADDR_ARR = 'opengl_proc_addrs'
 
 ASM_COMMENT_PREFIX = '# '
-
-H_HEADER =
-'/* Auto-generated file; do not modify! */
-
-#pragma once
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#if defined(__gl_h_)
-#error "gl.h must not be included alongside aglet.h"
-#endif
-
-#if defined(GL_GLEXT_VERSION) || defined(__gl_glext_h_)
-#error "glext.h must not be included alongside aglet.h"
-#endif
-
-#define GLFW_INCLUDE_NONE
-
-#define AGLET_ERROR_PROC_LOAD 1
-#define AGLET_ERROR_GL_ERROR 2
-#define AGLET_ERROR_MINIMUM_VERSION 3
-#define AGLET_ERROR_MISSING_EXTENSION 4
-
-#ifndef GLAPI
-#define GLAPI extern
-#endif
-
-#ifndef APIENTRY
-#if defined(_WIN32) && !defined(__CYGWIN__) && !defined(__SCITECH_SNAP__)
-#define APIENTRY __stdcall
-#else
-#define APIENTRY
-#endif
-#endif
-
-#ifndef APIENTRYP
-#define APIENTRYP APIENTRY *
-#endif
-
-typedef void *(*AgletLoadProc)(const char *name);
-'
-
-H_FOOTER =
-'int agletLoad(AgletLoadProc load_proc_fn);
-
-#ifdef __cplusplus
-}
-#endif
-'
 
 TRAMPOLINES_HEADER_AMD64 =
 ASM_COMMENT_PREFIX + 'Auto-generated file; do not modify!
@@ -104,17 +53,17 @@ void *#{ADDR_ARR}[%{num_procs}];
 
 %{ext_init_code}
 
-static int _load_versions(AgletLoadProc load_proc_fn) {
+static int _load_versions(AgletLoadProc load_proc) {
     //TODO
     return 0;
 }
 
-static int _load_extensions(AgletLoadProc load_proc_fn) {
-    const GLenum(*glGetError)() = load_proc_fn(\"glGetError\");
+static int _load_extensions(AgletLoadProc load_proc) {
+    const GLenum(*glGetError)() = load_proc(\"glGetError\");
 
     #ifdef GL_NUM_EXTENSIONS
-    const GLubyte *(*glGetStringi)(GLenum name, GLuint index) = load_proc_fn(\"glGetStringi\");
-    void (*glGetIntegerv)(GLenum, GLint*) = load_proc_fn(\"glGetIntegerv\");
+    const GLubyte *(*glGetStringi)(GLenum name, GLuint index) = load_proc(\"glGetStringi\");
+    void (*glGetIntegerv)(GLenum, GLint*) = load_proc(\"glGetIntegerv\");
     if (glGetStringi != NULL && glGetIntegerv != NULL) {
         int num_exts = 0;
         glGetIntegerv(GL_NUM_EXTENSIONS, &num_exts);
@@ -136,7 +85,7 @@ static int _load_extensions(AgletLoadProc load_proc_fn) {
 
     // fallback section
 
-    const GLubyte *(*glGetString)(GLenum name) = load_proc_fn(\"glGetString\");
+    const GLubyte *(*glGetString)(GLenum name) = load_proc(\"glGetString\");
 
     if (glGetString == NULL) {
         return AGLET_ERROR_PROC_LOAD;
@@ -176,29 +125,29 @@ static int _check_required_extensions() {
     return 0;
 }
 
-static int _load_procs(AgletLoadProc load_proc_fn) {
+static int _load_procs(AgletLoadProc load_proc) {
 %{proc_load_code}
 
     return 0;
 }
 
-int agletLoad(AgletLoadProc load_proc_fn) {
+int agletLoad(AgletLoadProc load_proc) {
     int rc = 0;
-    if ((rc = _load_versions(load_proc_fn)) != 0) {
+    if ((rc = _load_versions(load_proc)) != 0) {
         fprintf(stderr, \"[Aglet] Failed to query supported %{api} versions\\n\");
         return rc;
     }
 
-    if ((rc = _load_extensions(load_proc_fn)) != 0) {
+    if ((rc = _load_extensions(load_proc)) != 0) {
         fprintf(stderr, \"[Aglet] Failed to query %{api} extensions (rc %%d)\\n\", rc);
         return rc;
     }
 
-    if ((rc = _check_required_extensions(load_proc_fn)) != 0) {
+    if ((rc = _check_required_extensions(load_proc)) != 0) {
         return rc;
     }
 
-    if ((rc = _load_procs(load_proc_fn)) != 0) {
+    if ((rc = _load_procs(load_proc)) != 0) {
         return rc;
     }
 
@@ -224,7 +173,7 @@ EXTENSION_REQUIRED_TEMPLATE_C =
 }
 '
 
-class FnParam
+class ProcParam
     def initialize(name, type)
         @name = name
         @type = type
@@ -233,11 +182,11 @@ class FnParam
     attr_reader :type
 
     def gen_c()
-        return "#{@type} #{@name}".gsub('* ', ' *')
+        return "#{@type} #{@name}"
     end
 end
 
-class GLFunction
+class GLProc
     def initialize(name, ret_type, params)
         @name = name
         @ret_type = ret_type
@@ -246,12 +195,6 @@ class GLFunction
     attr_reader :name
     attr_reader :ret_type
     attr_reader :params
-
-    def gen_c()
-        fn_name_and_ret = "#{@ret_type} #{@name}".gsub('* ', ' *')
-        fn_def = "APIENTRY #{fn_name_and_ret}(#{params.map { |p| p.gen_c }.join(', ')})"
-        return fn_def
-    end
 end
 
 class GLType
@@ -261,10 +204,6 @@ class GLType
     end
     attr_reader :name
     attr_reader :typedef
-
-    def gen_c()
-        return "#{typedef}"
-    end
 end
 
 class GLEnum
@@ -276,21 +215,17 @@ class GLEnum
     attr_reader :name
     attr_reader :group
     attr_reader :value
-
-    def gen_c()
-        return "#define #{name} #{value}"
-    end
 end
 
 class GLDefs
-    def initialize(types, enums, fns)
+    def initialize(types, enums, procs)
         @types = types
         @enums = enums
-        @fns = fns
+        @procs = procs
     end
     attr_reader :types
     attr_reader :enums
-    attr_reader :fns
+    attr_reader :procs
 end
 
 class GLExtension
@@ -303,14 +238,14 @@ class GLExtension
 end
 
 class GLProfile
-    def initialize(api, base_api, version, extensions, type_names, enum_names, fn_names)
+    def initialize(api, base_api, version, extensions, type_names, enum_names, proc_names)
         @api = api
         @base_api = base_api
         @version = version
         @extensions = extensions
         @type_names = type_names
         @enum_names = enum_names
-        @fn_names = fn_names
+        @proc_names = proc_names
     end
     attr_reader :api
     attr_reader :base_api
@@ -318,7 +253,54 @@ class GLProfile
     attr_reader :extensions
     attr_reader :type_names
     attr_reader :enum_names
-    attr_reader :fn_names
+    attr_reader :proc_names
+end
+
+class TemplateSubs
+    def initialize(name, subs)
+        @name = name
+        @subs = subs
+    end
+    attr_reader :name
+    attr_reader :subs
+end
+
+def gen_from_template(template_path, subs_data)
+    template_content = File.read template_path
+    final_content = ''
+
+    last_off = 0
+
+    sec_templates = template_content.to_enum(:scan, /(?<start>%)\= foreach (?<name>.*?) \=%\n(?<content>.*?)\n%\= \/foreach \=%(?<end>\n)/m).map { Regexp.last_match }
+    sec_templates.each do |s|
+        sec_start = s.offset(:start)[0] - 1
+        sec_end = s.offset(:end)[1]
+
+        final_content << template_content[last_off..sec_start]
+        last_off = sec_end
+
+        sec_name = s.named_captures['name']
+        sec_content = s.named_captures['content']
+        sec_subs = subs_data[sec_name]
+        next if not sec_subs
+
+        sec_output = ''
+
+        sec_subs.each do |sub_group|
+            cur_content = sec_content.dup
+            sub_group.each do |sub_item|
+                cur_content.gsub! "@#{sub_item[0]}", sub_item[1]
+            end
+
+            sec_output << "#{cur_content}\n"
+        end
+
+        final_content << sec_output
+    end
+
+    final_content << template_content[last_off..]
+
+    return final_content
 end
 
 def params_to_str(params)
@@ -347,7 +329,7 @@ end
 def load_profile(reg, profile_path)
     require_types = []
     require_enums = []
-    require_fns = []
+    require_procs = []
 
     profile = File.open(profile_path) { |f| Nokogiri::XML(f) }
     profile_api = profile.xpath('//profile/api/text()').text
@@ -372,11 +354,11 @@ def load_profile(reg, profile_path)
 
         require_types += require_secs.xpath('.//type/@name').map { |n| n.text }
         require_enums += require_secs.xpath('.//enum/@name').map { |n| n.text }
-        require_fns += require_secs.xpath('.//command/@name').map { |n| n.text }
+        require_procs += require_secs.xpath('.//command/@name').map { |n| n.text }
 
         require_types -= remove_secs.xpath('.//type/@name').map { |n| n.text }
         require_enums -= remove_secs.xpath('.//enum/@name').map { |n| n.text }
-        require_fns -= remove_secs.xpath('.//command/@name').map { |n| n.text }
+        require_procs -= remove_secs.xpath('.//command/@name').map { |n| n.text }
     end
 
     profile_extensions = profile.xpath('//profile//extensions//extension')
@@ -393,14 +375,14 @@ def load_profile(reg, profile_path)
             raise "Extension #{ext_name} is not supported by the selected API (#{profile_api})"
         end
 
-        require_fns += ext.xpath('.//require//command/@name').map { |n| n.text }
-        require_fns -= ext.xpath('.//remove//command/@name').map { |n| n.text }
+        require_procs += ext.xpath('.//require//command/@name').map { |n| n.text }
+        require_procs -= ext.xpath('.//remove//command/@name').map { |n| n.text }
     end
 
     print "Finished discovering members for profile \"#{profile_api} #{profile_version}\""
-    print " (#{require_types.length} types, #{require_enums.length} enums, #{require_fns.length} functions)\n"
+    print " (#{require_types.length} types, #{require_enums.length} enums, #{require_procs.length} functions)\n"
 
-    return GLProfile.new(profile_api, profile_api_base, profile_version, profile_extensions, require_types.to_set, require_enums.to_set, require_fns.to_set)
+    return GLProfile.new(profile_api, profile_api_base, profile_version, profile_extensions, require_types.to_set, require_enums.to_set, require_procs.to_set)
 end
 
 def parse_param_type(raw)
@@ -410,9 +392,9 @@ end
 def load_gl_members(reg, profile)
     types = []
     enums = []
-    fns = []
+    procs = []
 
-    req_fns = profile.fn_names
+    req_procs = profile.proc_names
 
     extra_types = Set[]
 
@@ -420,7 +402,7 @@ def load_gl_members(reg, profile)
     reg.xpath('//registry//commands//command').each do |cmd_root|
         cmd_name = cmd_root.xpath('.//proto//name')
 
-        next unless req_fns.include? cmd_name.text
+        next unless req_procs.include? cmd_name.text
 
         name = cmd_name.text.strip
 
@@ -444,10 +426,10 @@ def load_gl_members(reg, profile)
             param_type = parse_param_type cmd_param.inner_html
             param_type.gsub!(' *', '* ')
             param_type.strip!
-            params << FnParam.new(param_name.strip, param_type)
+            params << ProcParam.new(param_name.strip, param_type)
         end
 
-        fns << GLFunction.new(name, ret, params)
+        procs << GLProc.new(name, ret, params)
     end
 
     req_types = profile.type_names + extra_types
@@ -457,8 +439,12 @@ def load_gl_members(reg, profile)
     more_types = Set[]
 
     reg.xpath('//registry//types/type').each do |type_root|
+        next if name_attr = type_root.at_xpath('./@name') and
+            (name_attr.text == 'khrplatform' or name_attr.text == 'GLhandleARB')
+
         type_name = type_root.xpath('.//name').text
-        type_typedef = type_root.text
+        # bad idea to parse XML with regex, but this is extremely domain-specific
+        type_typedef = type_root.to_s.gsub('<apientry/>', 'APIENTRY').gsub(/<.*?>/, '')
 
         types << GLType.new(type_name, type_typedef)
     end
@@ -472,56 +458,42 @@ def load_gl_members(reg, profile)
         enums << GLEnum.new(enum_name, enum_group, enum_value)
     end
 
-    GLDefs.new(types, enums, fns)
+    GLDefs.new(types, enums, procs)
 end
 
 def generate_header(out_dir, profile, defs)
     out_file = File.open("#{out_dir}/aglet.h", 'w')
 
-    out_file << H_HEADER
+    subs_data = {}
 
-    out_file << "\n"
-
+    subs_data['type_defs'] = []
     defs.types.each do |t|
-        out_file << "#{t.gen_c}\n"
-        if t.typedef =~ /^#include/
-            out_file << "\n"
-        end
+        subs_data['type_defs'] << {name: t.name, typedef: t.typedef}
     end
 
-    out_file << "\n"
-
+    subs_data['enum_defs'] = []
     defs.enums.group_by { |e| e.group }.each do |name, group|
-        if group != ''
-            out_file << "// enum group #{name}\n"
-        else
-            out_file << "// ungrouped\n"
-        end
         group.each do |e|
-            out_file << "#{e.gen_c}\n"
+            subs_data['enum_defs'] << {name: e.name, value: e.value}
         end
-        out_file << "\n"
     end
-
-    out_file << "\n"
-
-    defs.fns.each do |fn|
-        out_file << "#{fn.gen_c};\n"
+    
+    subs_data['proc_defs'] = []
+    defs.procs.each do |p|
+        subs_data['proc_defs'] << {name: p.name, ret_type: p.ret_type, params: p.params.map { |p| p.gen_c }.join(', ')}
     end
-
-    out_file << "\n"
-
+    
+    subs_data['ext_defs'] = []
     profile.extensions.each do |e|
-        out_file << "GLAPI int AGLET_#{e.name};\n"
+        subs_data['ext_defs'] << {name: e.name}
     end
-
-    out_file << "\n"
-
-    out_file << H_FOOTER
+    
+    out_file << gen_from_template("#{__dir__}/templates/c/aglet.h", subs_data)
+    return
 end
 
 def generate_loader_source(out_dir, profile, defs)
-    fns = defs.fns
+    procs = defs.procs
 
     out_file = File.open("#{out_dir}/aglet_loader.c", 'w')
 
@@ -539,26 +511,26 @@ def generate_loader_source(out_dir, profile, defs)
         ext_check_code << indent(EXTENSION_REQUIRED_TEMPLATE_C % [name: e.name], 4) if e.required
     end
 
-    fns.each_with_index do |fn, i|
-        proc_load_code << "    #{ADDR_ARR}[#{i}] = load_proc_fn(\"#{fn.name}\");\n"
+    procs.each_with_index do |proc, i|
+        proc_load_code << "    #{ADDR_ARR}[#{i}] = load_proc(\"#{proc.name}\");\n"
     end
 
     proc_load_code.delete_suffix! "\n"
 
-    out_file << LOADER_TEMPLATE % [api: profile.api, num_procs: fns.size, proc_load_code: proc_load_code,
+    out_file << LOADER_TEMPLATE % [api: profile.api, num_procs: procs.size, proc_load_code: proc_load_code,
         ext_init_code: ext_init_code, ext_load_code: ext_load_code, ext_check_code: ext_check_code]
 end
 
 def generate_trampolines_amd64(out_dir, defs)
-    fns = defs.fns
+    procs = defs.procs
 
     out_file = File.open("#{out_dir}/aglet_trampolines.s", 'w')
 
     out_file << TRAMPOLINES_HEADER_AMD64
 
-    fns.each_with_index do |fn, i|
+    procs.each_with_index do |proc, i|
         out_file << "\n"
-        out_file << TRAMPOLINE_TEMPLATE_AMD64 % [name: fn.name, index: i]
+        out_file << TRAMPOLINE_TEMPLATE_AMD64 % [name: proc.name, index: i]
     end
 end
 
