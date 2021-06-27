@@ -15,6 +15,12 @@ end
 
 GL_REGISTRY_PATH = "#{__dir__}/specs/OpenGL-Registry/xml/gl.xml"
 
+KHR_HEADER_PATH = "#{__dir__}/specs/EGL-Registry/api/KHR/khrplatform.h"
+
+C_HEADER_TEMPLATE_PATH = "#{__dir__}/templates/c/aglet.h"
+
+C_LOADER_TEMPLATE_PATH = "#{__dir__}/templates/c/aglet.h"
+
 ADDR_ARR = 'opengl_proc_addrs'
 
 ASM_COMMENT_PREFIX = '# '
@@ -488,7 +494,7 @@ def generate_header(out_dir, profile, defs)
         subs_data['ext_defs'] << {name: e.name}
     end
     
-    out_file << gen_from_template("#{__dir__}/templates/c/aglet.h", subs_data)
+    out_file << gen_from_template(C_HEADER_TEMPLATE_PATH, subs_data)
     return
 end
 
@@ -555,4 +561,4 @@ generate_trampolines_amd64(source_out_path, defs)
 
 khr_header_out_path = "#{aglet_header_out_path}/KHR"
 FileUtils.mkdir_p khr_header_out_path
-FileUtils.cp("#{__dir__}/specs/EGL-Registry/api/KHR/khrplatform.h", "#{khr_header_out_path}/khrplatform.h")
+FileUtils.cp(KHR_HEADER_PATH, "#{khr_header_out_path}/khrplatform.h")
