@@ -5,6 +5,14 @@ require 'nokogiri'
 require 'optparse'
 require 'set'
 
+def indent(str, cols)
+    indent_space = ''
+    for i in 1..cols
+        indent_space << ' '
+    end
+    "#{indent_space}#{str.gsub(/\n/, "\n#{indent_space}")}"
+end
+
 GL_REGISTRY_PATH = "#{__dir__}/specs/OpenGL-Registry/xml/gl.xml"
 
 ADDR_ARR = 'opengl_fn_addrs'
@@ -30,8 +38,17 @@ extern "C" {
 
 #define GLFW_INCLUDE_NONE
 
+#define AGLET_ERROR_PROC_LOAD 1
+#define AGLET_ERROR_GL_ERROR 2
+#define AGLET_ERROR_MINIMUM_VERSION 3
+#define AGLET_ERROR_MISSING_EXTENSION 4
+
+#ifndef GLAPI
+#define GLAPI extern
+#endif
+
 #ifndef APIENTRY
-#if defined(_WIN32) && !defined(APIENTRY) && !defined(__CYGWIN__) && !defined(__SCITECH_SNAP__)
+#if defined(_WIN32) && !defined(__CYGWIN__) && !defined(__SCITECH_SNAP__)
 #define APIENTRY __stdcall
 #else
 #define APIENTRY
@@ -43,12 +60,10 @@ extern "C" {
 #endif
 
 typedef void *(*AgletLoadProc)(const char *name);
-
-#include <stdbool.h>
 '
 
 H_FOOTER =
-'bool agletLoad(AgletLoadProc load_proc_fn);
+'int agletLoad(AgletLoadProc load_proc_fn);
 
 #ifdef __cplusplus
 }
@@ -64,7 +79,7 @@ ASM_COMMENT_PREFIX + 'Auto-generated file; do not modify!
 .text
 '
 
-TRAMPLINE_TEMPLATE_AMD64 =
+TRAMPOLINE_TEMPLATE_AMD64 =
 '.global %{name}
 %{name}:
     movq r11, [' + ADDR_ARR + '@GOTPCREL[rip]]
@@ -77,23 +92,138 @@ LOADER_TEMPLATE =
 #include <aglet/aglet.h>
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern \"C\" {
 #endif
 
-void *#{ADDR_ARR}[%d];
+void *#{ADDR_ARR}[%{num_procs}];
 
-bool agletLoad(AgletLoadProc load_proc_fn) {
-%s
+%{ext_init_code}
 
-    return true;
+static int _load_versions(AgletLoadProc load_proc_fn) {
+    //TODO
+    return 0;
+}
+
+static int _load_extensions(AgletLoadProc load_proc_fn) {
+    const GLenum(*glGetError)() = load_proc_fn(\"glGetError\");
+
+    #ifdef GL_NUM_EXTENSIONS2
+    const GLubyte *(*glGetStringi)(GLenum name, GLuint index) = load_proc_fn(\"glGetStringi\");
+    void (*glGetIntegerv)(GLenum, GLint*) = load_proc_fn(\"glGetIntegerv\");
+    if (glGetStringi != NULL && glGetIntegerv != NULL) {
+        int num_exts = 0;
+        glGetIntegerv(GL_NUM_EXTENSIONS, &num_exts);
+        
+        if (glGetError() != GL_NO_ERROR) {
+            return AGLET_ERROR_GL_ERROR;
+        }
+
+        for (int i = 0; i < num_exts; i++) {
+            const char *cur_ext = glGetStringi(GL_EXTENSIONS, i);
+            const size_t cur_len = strlen(cur_ext);
+
+%{ext_load_code}
+        }
+
+        return 0;
+    }
+    #endif
+
+    // fallback section
+
+    const GLubyte *(*glGetString)(GLenum name) = load_proc_fn(\"glGetString\");
+
+    if (glGetString == NULL) {
+        return AGLET_ERROR_PROC_LOAD;
+    }
+
+    const char *exts_str = (const char *) glGetString(GL_EXTENSIONS);
+    int glErr = glGetError();
+    if (glErr != GL_NO_ERROR) {
+        return glErr;
+    }
+
+    const char *cur_ext = exts_str;
+    const char *next_ext = exts_str;
+    while (next_ext != NULL) {
+        cur_ext = next_ext + 1;
+        next_ext = strchr(cur_ext, ' ');
+        
+        size_t cur_len = next_ext != NULL ? next_ext - cur_ext : strlen(cur_ext);
+
+        if (cur_len == 0) {
+            continue;
+        }
+
+%{ext_load_code}
+    }
+
+    return 0;
+}
+
+static int _check_required_extensions() {
+    bool missing_ext = false;
+%{ext_check_code}
+
+    if (missing_ext) {
+        return AGLET_ERROR_MISSING_EXTENSION;
+    }
+
+    return 0;
+}
+
+static int _load_procs(AgletLoadProc load_proc_fn) {
+%{proc_load_code}
+
+    return 0;
+}
+
+int agletLoad(AgletLoadProc load_proc_fn) {
+    int rc = 0;
+    if ((rc = _load_versions(load_proc_fn)) != 0) {
+        fprintf(stderr, \"[Aglet] Failed to query supported %{api} versions\\n\");
+        return rc;
+    }
+
+    if ((rc = _load_extensions(load_proc_fn)) != 0) {
+        fprintf(stderr, \"[Aglet] Failed to query %{api} extensions (rc %%d)\\n\", rc);
+        return rc;
+    }
+
+    if ((rc = _check_required_extensions(load_proc_fn)) != 0) {
+        return rc;
+    }
+
+    if ((rc = _load_procs(load_proc_fn)) != 0) {
+        return rc;
+    }
+
+    return 0;
 }
 
 #ifdef __cplusplus
 }
 #endif
 "
+
+EXTENSION_MATCH_TEMPLATE_C =
+'if (strncmp(cur_ext, "%{name}", cur_len) == 0) {
+    AGLET_%{name} = 1;
+    continue;
+}
+'
+
+EXTENSION_REQUIRED_TEMPLATE_C =
+'if (!AGLET_%{name}) {
+    fprintf(stderr, "[Aglet] Required extension %{name} is not available\n");
+    missing_ext = true;
+}
+'
 
 class FnParam
     def initialize(name, type)
@@ -164,11 +294,21 @@ class GLDefs
     attr_reader :fns
 end
 
+class GLExtension
+    def initialize(name, required)
+        @name = name
+        @required = required
+    end
+    attr_reader :name
+    attr_reader :required
+end
+
 class GLProfile
-    def initialize(api, base_api, version, type_names, enum_names, fn_names)
+    def initialize(api, base_api, version, extensions, type_names, enum_names, fn_names)
         @api = api
         @base_api = base_api
         @version = version
+        @extensions = extensions
         @type_names = type_names
         @enum_names = enum_names
         @fn_names = fn_names
@@ -176,6 +316,7 @@ class GLProfile
     attr_reader :api
     attr_reader :base_api
     attr_reader :version
+    attr_reader :extensions
     attr_reader :type_names
     attr_reader :enum_names
     attr_reader :fn_names
@@ -239,11 +380,14 @@ def load_profile(reg, profile_path)
         require_fns -= remove_secs.xpath('.//command/@name').map { |n| n.text }
     end
 
-    profile_extensions = profile.xpath('//profile//extensions//extension/text()').map { |e| e.text }
+    profile_extensions = profile.xpath('//profile//extensions//extension')
+        .map { |e| GLExtension.new(e.text, e.xpath('./@required')) }
+
+    ext_names = profile_extensions.map { |e| e.name }
 
     reg.xpath('//registry//extensions//extension').each do |ext|
         ext_name = ext.xpath('@name').text
-        next unless profile_extensions.include? ext_name
+        next unless ext_names.include? ext_name
 
         supported = ext.xpath('@supported').text
         if supported != nil and not supported.split('|').include? profile_api
@@ -257,19 +401,17 @@ def load_profile(reg, profile_path)
     print "Finished discovering members for profile \"#{profile_api} #{profile_version}\""
     print " (#{require_types.length} types, #{require_enums.length} enums, #{require_fns.length} functions)\n"
 
-    return GLProfile.new(profile_api, profile_api_base, profile_version, require_types.to_set, require_enums.to_set, require_fns.to_set)
+    return GLProfile.new(profile_api, profile_api_base, profile_version, profile_extensions, require_types.to_set, require_enums.to_set, require_fns.to_set)
 end
 
 def parse_param_type(raw)
     raw.gsub(/<name>.*<\/name>/, '').gsub(/<\/?ptype>/, '').gsub('* ', ' *')
 end
 
-def load_gl_members(reg, profile_path)
+def load_gl_members(reg, profile)
     types = []
     enums = []
     fns = []
-
-    profile = load_profile(reg, profile_path)
 
     req_fns = profile.fn_names
 
@@ -334,7 +476,7 @@ def load_gl_members(reg, profile_path)
     GLDefs.new(types, enums, fns)
 end
 
-def generate_header(out_dir, defs)
+def generate_header(out_dir, profile, defs)
     out_file = File.open("#{out_dir}/aglet.h", 'w')
 
     out_file << H_HEADER
@@ -370,23 +512,42 @@ def generate_header(out_dir, defs)
 
     out_file << "\n"
 
+    profile.extensions.each do |e|
+        out_file << "GLAPI int AGLET_#{e.name};\n"
+    end
+
+    out_file << "\n"
+
     out_file << H_FOOTER
 end
 
-def generate_loader_source(out_dir, defs)
+def generate_loader_source(out_dir, profile, defs)
     fns = defs.fns
 
     out_file = File.open("#{out_dir}/aglet_loader.c", 'w')
 
-    load_code = ''
+    ext_init_code = ''
+    ext_load_code = ''
+    ext_check_code = ''
+    proc_load_code = ''
 
-    fns.each_with_index do |fn, i|
-        load_code << "    #{ADDR_ARR}[#{i}] = load_proc_fn(\"#{fn.name}\");\n"
+    profile.extensions.each do |e|
+        ext_init_code << "int AGLET_#{e.name} = 0;"
+
+        #TODO: the substitution happens twice and the indent is wrong for one of them
+        ext_load_code << indent(EXTENSION_MATCH_TEMPLATE_C % [name: e.name], 12)
+
+        ext_check_code << indent(EXTENSION_REQUIRED_TEMPLATE_C % [name: e.name], 4) if e.required
     end
 
-    load_code.delete_suffix! "\n"
+    fns.each_with_index do |fn, i|
+        proc_load_code << "    #{ADDR_ARR}[#{i}] = load_proc_fn(\"#{fn.name}\");\n"
+    end
 
-    out_file << LOADER_TEMPLATE % [fns.size, load_code]
+    proc_load_code.delete_suffix! "\n"
+
+    out_file << LOADER_TEMPLATE % [api: profile.api, num_procs: fns.size, proc_load_code: proc_load_code,
+        ext_init_code: ext_init_code, ext_load_code: ext_load_code, ext_check_code: ext_check_code]
 end
 
 def generate_trampolines_amd64(out_dir, defs)
@@ -398,7 +559,7 @@ def generate_trampolines_amd64(out_dir, defs)
 
     fns.each_with_index do |fn, i|
         out_file << "\n"
-        out_file << TRAMPLINE_TEMPLATE_AMD64 % [name: fn.name, index: i]
+        out_file << TRAMPOLINE_TEMPLATE_AMD64 % [name: fn.name, index: i]
     end
 end
 
@@ -406,7 +567,8 @@ args = parse_args
 
 reg = File.open(GL_REGISTRY_PATH) { |f| Nokogiri::XML(f) }
 
-defs = load_gl_members(reg, args[:profile])
+profile = load_profile(reg, args[:profile])
+defs = load_gl_members(reg, profile)
 
 out_path = args[:output]
 base_header_out_path = "#{out_path}/include"
@@ -416,8 +578,8 @@ source_out_path = "#{out_path}/src"
 FileUtils.mkdir_p aglet_header_out_path
 FileUtils.mkdir_p source_out_path
 
-generate_header(aglet_header_out_path, defs)
-generate_loader_source(source_out_path, defs)
+generate_header(aglet_header_out_path, profile, defs)
+generate_loader_source(source_out_path, profile, defs)
 generate_trampolines_amd64(source_out_path, defs)
 
 khr_header_out_path = "#{aglet_header_out_path}/KHR"
