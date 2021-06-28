@@ -47,7 +47,5 @@ available. Non-required extensions will be ignored if not available.
 
 ## Planned Features
 
-- Generic C trampoline implementation
-- x86, ARM, and ARM64 trampoline implementations
 - Multi-version configuration to allow loading of optional features
 - Per-context function loading
