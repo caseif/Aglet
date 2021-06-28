@@ -48,19 +48,21 @@ typedef unsigned int GLhandleARB;
 #endif
 
 %= foreach type_defs =%
-@typedef
+@{typedef}
 %= /foreach =%
 
 %= foreach enum_defs =%
-#define @name @value
+#define @{name} @{value}
 %= /foreach =%
 
 %= foreach proc_defs =%
-GLAPI APIENTRY @ret_type @name(@params);
+typedef @{ret_type} (APIENTRYP PFN@{name_upper}PROC)(@{params});
+GLAPI PFN@{name_upper}PROC aglet_@{name};
+#define @{name} aglet_@{name}
 %= /foreach =%
 
 %= foreach ext_defs =%
-GLAPI int AGLET_@name;
+GLAPI int AGLET_@{name};
 %= /foreach =%
 
 int agletLoad(AgletLoadProc load_proc_fn);

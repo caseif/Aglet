@@ -19,165 +19,7 @@ KHR_HEADER_PATH = "#{__dir__}/specs/EGL-Registry/api/KHR/khrplatform.h"
 
 C_HEADER_TEMPLATE_PATH = "#{__dir__}/templates/c/aglet.h"
 
-C_LOADER_TEMPLATE_PATH = "#{__dir__}/templates/c/aglet.h"
-
-ADDR_ARR = 'opengl_proc_addrs'
-
-ASM_COMMENT_PREFIX = '# '
-
-TRAMPOLINES_HEADER_AMD64 =
-ASM_COMMENT_PREFIX + 'Auto-generated file; do not modify!
-
-.intel_syntax noprefix
-
-.extern ' + ADDR_ARR + '
-.text
-'
-
-TRAMPOLINE_TEMPLATE_AMD64 =
-'.global %{name}
-%{name}:
-    movq r11, [' + ADDR_ARR + '@GOTPCREL[rip]]
-    jmp [r11]+%{index}*8
-'
-
-LOADER_TEMPLATE =
-"/* Auto-generated file; do not modify! */
-
-#include <aglet/aglet.h>
-
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <string.h>
-
-#ifdef __cplusplus
-extern \"C\" {
-#endif
-
-void *#{ADDR_ARR}[%{num_procs}];
-
-%{ext_init_code}
-
-static int _load_versions(AgletLoadProc load_proc) {
-    //TODO
-    return 0;
-}
-
-static int _load_extensions(AgletLoadProc load_proc) {
-    const GLenum(*glGetError)() = load_proc(\"glGetError\");
-
-    #ifdef GL_NUM_EXTENSIONS
-    const GLubyte *(*glGetStringi)(GLenum name, GLuint index) = load_proc(\"glGetStringi\");
-    void (*glGetIntegerv)(GLenum, GLint*) = load_proc(\"glGetIntegerv\");
-    if (glGetStringi != NULL && glGetIntegerv != NULL) {
-        int num_exts = 0;
-        glGetIntegerv(GL_NUM_EXTENSIONS, &num_exts);
-        
-        if (glGetError() != GL_NO_ERROR) {
-            return AGLET_ERROR_GL_ERROR;
-        }
-
-        for (int i = 0; i < num_exts; i++) {
-            const char *cur_ext = glGetStringi(GL_EXTENSIONS, i);
-            const size_t cur_len = strlen(cur_ext);
-
-%{ext_load_code}
-        }
-
-        return 0;
-    }
-    #endif
-
-    // fallback section
-
-    const GLubyte *(*glGetString)(GLenum name) = load_proc(\"glGetString\");
-
-    if (glGetString == NULL) {
-        return AGLET_ERROR_PROC_LOAD;
-    }
-
-    const char *exts_str = (const char *) glGetString(GL_EXTENSIONS);
-    int glErr = glGetError();
-    if (glErr != GL_NO_ERROR) {
-        return glErr;
-    }
-
-    const char *cur_ext = exts_str;
-    const char *next_ext = exts_str;
-    while (next_ext != NULL) {
-        cur_ext = next_ext + 1;
-        next_ext = strchr(cur_ext, ' ');
-        
-        size_t cur_len = next_ext != NULL ? next_ext - cur_ext : strlen(cur_ext);
-
-        if (cur_len == 0) {
-            continue;
-        }
-
-%{ext_load_code}
-    }
-
-    return 0;
-}
-
-static int _check_required_extensions() {
-    bool missing_ext = false;
-%{ext_check_code}
-    if (missing_ext) {
-        return AGLET_ERROR_MISSING_EXTENSION;
-    }
-
-    return 0;
-}
-
-static int _load_procs(AgletLoadProc load_proc) {
-%{proc_load_code}
-
-    return 0;
-}
-
-int agletLoad(AgletLoadProc load_proc) {
-    int rc = 0;
-    if ((rc = _load_versions(load_proc)) != 0) {
-        fprintf(stderr, \"[Aglet] Failed to query supported %{api} versions\\n\");
-        return rc;
-    }
-
-    if ((rc = _load_extensions(load_proc)) != 0) {
-        fprintf(stderr, \"[Aglet] Failed to query %{api} extensions (rc %%d)\\n\", rc);
-        return rc;
-    }
-
-    if ((rc = _check_required_extensions(load_proc)) != 0) {
-        return rc;
-    }
-
-    if ((rc = _load_procs(load_proc)) != 0) {
-        return rc;
-    }
-
-    return 0;
-}
-
-#ifdef __cplusplus
-}
-#endif
-"
-
-EXTENSION_MATCH_TEMPLATE_C =
-'if (strlen("%{name}") == cur_len && strncmp(cur_ext, "%{name}", cur_len) == 0) {
-    AGLET_%{name} = 1;
-    continue;
-}
-'
-
-EXTENSION_REQUIRED_TEMPLATE_C =
-'if (!AGLET_%{name}) {
-    fprintf(stderr, "[Aglet] Required extension %{name} is not available\n");
-    missing_ext = true;
-}
-'
+C_LOADER_TEMPLATE_PATH = "#{__dir__}/templates/c/aglet_loader.c"
 
 class ProcParam
     def initialize(name, type)
@@ -277,10 +119,10 @@ def gen_from_template(template_path, subs_data)
 
     last_off = 0
 
-    sec_templates = template_content.to_enum(:scan, /(?<start>%)\= foreach (?<name>.*?) \=%\n(?<content>.*?)\n%\= \/foreach \=%(?<end>\n)/m).map { Regexp.last_match }
+    sec_templates = template_content.to_enum(:scan, /(?<start>[ \t]*%)\= foreach (?<name>.*?) \=%\n(?<content>.*?)\n[ \t]*%\= \/foreach \=%(?<end>\n)/m).map { Regexp.last_match }
     sec_templates.each do |s|
         sec_start = s.offset(:start)[0] - 1
-        sec_end = s.offset(:end)[1]
+        sec_end = s.end(:end)
 
         final_content << template_content[last_off..sec_start]
         last_off = sec_end
@@ -295,7 +137,7 @@ def gen_from_template(template_path, subs_data)
         sec_subs.each do |sub_group|
             cur_content = sec_content.dup
             sub_group.each do |sub_item|
-                cur_content.gsub! "@#{sub_item[0]}", sub_item[1]
+                cur_content.gsub! "@{#{sub_item[0]}}", sub_item[1]
             end
 
             sec_output << "#{cur_content}\n"
@@ -486,7 +328,8 @@ def generate_header(out_dir, profile, defs)
     
     subs_data['proc_defs'] = []
     defs.procs.each do |p|
-        subs_data['proc_defs'] << {name: p.name, ret_type: p.ret_type, params: p.params.map { |p| p.gen_c }.join(', ')}
+        subs_data['proc_defs'] << {name: p.name, name_upper: p.name.upcase, ret_type: p.ret_type,
+            params: p.params.map { |p| p.gen_c }.join(', ')}
     end
     
     subs_data['ext_defs'] = []
@@ -503,28 +346,19 @@ def generate_loader_source(out_dir, profile, defs)
 
     out_file = File.open("#{out_dir}/aglet_loader.c", 'w')
 
-    ext_init_code = ''
-    ext_load_code = ''
-    ext_check_code = ''
-    proc_load_code = ''
+    subs_data = {}
 
+    subs_data['procs'] = []
+    defs.procs.each do |p|
+        subs_data['procs'] << {name: p.name, name_upper: p.name.upcase}
+    end
+    
+    subs_data['extensions'] = []
     profile.extensions.each do |e|
-        ext_init_code << "int AGLET_#{e.name} = 0;"
-
-        #TODO: the substitution happens twice and the indent is wrong for one of them
-        ext_load_code << indent(EXTENSION_MATCH_TEMPLATE_C % [name: e.name], 12)
-
-        ext_check_code << indent(EXTENSION_REQUIRED_TEMPLATE_C % [name: e.name], 4) if e.required
+        subs_data['extensions'] << {name: e.name}
     end
 
-    procs.each_with_index do |proc, i|
-        proc_load_code << "    #{ADDR_ARR}[#{i}] = load_proc(\"#{proc.name}\");\n"
-    end
-
-    proc_load_code.delete_suffix! "\n"
-
-    out_file << LOADER_TEMPLATE % [api: profile.api, num_procs: procs.size, proc_load_code: proc_load_code,
-        ext_init_code: ext_init_code, ext_load_code: ext_load_code, ext_check_code: ext_check_code]
+    out_file << gen_from_template(C_LOADER_TEMPLATE_PATH, subs_data)
 end
 
 def generate_trampolines_amd64(out_dir, defs)
@@ -557,7 +391,6 @@ FileUtils.mkdir_p source_out_path
 
 generate_header(aglet_header_out_path, profile, defs)
 generate_loader_source(source_out_path, profile, defs)
-generate_trampolines_amd64(source_out_path, defs)
 
 khr_header_out_path = "#{aglet_header_out_path}/KHR"
 FileUtils.mkdir_p khr_header_out_path
