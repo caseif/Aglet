@@ -16,10 +16,11 @@ extern "C" {
 
 #define GLFW_INCLUDE_NONE
 
-#define AGLET_ERROR_PROC_LOAD 1
-#define AGLET_ERROR_GL_ERROR 2
-#define AGLET_ERROR_MINIMUM_VERSION 3
-#define AGLET_ERROR_MISSING_EXTENSION 4
+#define AGLET_ERROR_UNSPECIFIED 1
+#define AGLET_ERROR_PROC_LOAD 2
+#define AGLET_ERROR_GL_ERROR 3
+#define AGLET_ERROR_MINIMUM_VERSION 4
+#define AGLET_ERROR_MISSING_EXTENSION 5
 
 #ifndef GLAPI
 #define GLAPI extern
@@ -47,6 +48,14 @@ typedef void *GLhandleARB;
 typedef unsigned int GLhandleARB;
 #endif
 
+%= foreach api_versions =%
+GLAPI int AGLET_@{name};
+%= /foreach =%
+
+%= foreach ext_defs =%
+GLAPI int AGLET_@{name};
+%= /foreach =%
+
 %= foreach type_defs =%
 @{typedef}
 %= /foreach =%
@@ -59,10 +68,6 @@ typedef unsigned int GLhandleARB;
 typedef @{ret_type} (APIENTRYP PFN@{name_upper}PROC)(@{params});
 GLAPI PFN@{name_upper}PROC aglet_@{name};
 #define @{name} aglet_@{name}
-%= /foreach =%
-
-%= foreach ext_defs =%
-GLAPI int AGLET_@{name};
 %= /foreach =%
 
 int agletLoad(AgletLoadProc load_proc_fn);

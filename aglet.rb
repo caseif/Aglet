@@ -34,6 +34,19 @@ class ProcParam
     end
 end
 
+class GLVersion
+    def initialize(api, name, major, minor)
+        @api = api
+        @name = name
+        @major = major
+        @minor = minor
+    end
+    attr_reader :api
+    attr_reader :name
+    attr_reader :major
+    attr_reader :minor
+end
+
 class GLProc
     def initialize(name, ret_type, params)
         @name = name
@@ -66,11 +79,13 @@ class GLEnum
 end
 
 class GLDefs
-    def initialize(types, enums, procs)
+    def initialize(versions, types, enums, procs)
+        @versions = versions
         @types = types
         @enums = enums
         @procs = procs
     end
+    attr_reader :versions
     attr_reader :types
     attr_reader :enums
     attr_reader :procs
@@ -200,13 +215,13 @@ def load_profile(reg, profile_path)
             remove_secs = ver.css("remove:not([profile]), remove[profile='compatibility']")
         end
 
-        require_types += require_secs.xpath('.//type/@name').map { |n| n.text }
-        require_enums += require_secs.xpath('.//enum/@name').map { |n| n.text }
-        require_procs += require_secs.xpath('.//command/@name').map { |n| n.text }
+        require_types += require_secs.xpath('.//type/@name').map { |n| n.text }.flatten
+        require_enums += require_secs.xpath('.//enum/@name').map { |n| n.text }.flatten
+        require_procs += require_secs.xpath('.//command/@name').map { |n| n.text }.flatten
 
-        require_types -= remove_secs.xpath('.//type/@name').map { |n| n.text }
-        require_enums -= remove_secs.xpath('.//enum/@name').map { |n| n.text }
-        require_procs -= remove_secs.xpath('.//command/@name').map { |n| n.text }
+        require_types -= remove_secs.xpath('.//type/@name').map { |n| n.text }.flatten
+        require_enums -= remove_secs.xpath('.//enum/@name').map { |n| n.text }.flatten
+        require_procs -= remove_secs.xpath('.//command/@name').map { |n| n.text }.flatten
     end
 
     profile_extensions = profile.xpath('//profile//extensions//extension')
@@ -238,9 +253,18 @@ def parse_param_type(raw)
 end
 
 def load_gl_members(reg, profile)
+    versions = []
     types = []
     enums = []
     procs = []
+
+    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile.base_api)
+    gl_feature_spec.each do |ver|
+        feature_number = ver.xpath('@number').text
+        feature_name = ver.xpath('@name').text
+        feature_major, feature_minor = feature_number.split('.')
+        versions << GLVersion.new(profile.base_api, feature_name, feature_major, feature_minor)
+    end
 
     req_procs = profile.proc_names
 
@@ -306,13 +330,18 @@ def load_gl_members(reg, profile)
         enums << GLEnum.new(enum_name, enum_group, enum_value)
     end
 
-    GLDefs.new(types, enums, procs)
+    GLDefs.new(versions, types, enums, procs)
 end
 
 def generate_header(out_dir, profile, defs)
     out_file = File.open("#{out_dir}/aglet.h", 'w')
 
     subs_data = {}
+
+    subs_data['api_versions'] = []
+    defs.versions.each do |v|
+        subs_data['api_versions'] << {name: v.name.upcase, major: v.major, minor: v.minor}
+    end
 
     subs_data['type_defs'] = []
     defs.types.each do |t|
@@ -348,14 +377,19 @@ def generate_loader_source(out_dir, profile, defs)
 
     subs_data = {}
 
-    subs_data['procs'] = []
-    defs.procs.each do |p|
-        subs_data['procs'] << {name: p.name, name_upper: p.name.upcase}
+    subs_data['api_versions'] = []
+    defs.versions.each do |v|
+        subs_data['api_versions'] << {name: v.name, major: v.major, minor: v.minor}
     end
     
     subs_data['extensions'] = []
     profile.extensions.each do |e|
         subs_data['extensions'] << {name: e.name}
+    end
+
+    subs_data['procs'] = []
+    defs.procs.each do |p|
+        subs_data['procs'] << {name: p.name, name_upper: p.name.upcase}
     end
 
     out_file << gen_from_template(C_LOADER_TEMPLATE_PATH, subs_data)
