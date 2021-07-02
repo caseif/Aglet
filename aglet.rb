@@ -315,6 +315,7 @@ def load_gl_members(reg, profile)
             (name_attr.text == 'khrplatform' or name_attr.text == 'GLhandleARB')
 
         type_name = type_root.xpath('.//name').text
+        next unless req_types.include? type_name
         # bad idea to parse XML with regex, but this is extremely domain-specific
         type_typedef = type_root.to_s.gsub('<apientry/>', 'APIENTRY').gsub(/<.*?>/, '')
 
@@ -326,6 +327,7 @@ def load_gl_members(reg, profile)
         enum_group = enum_root.xpath('./@group').text
         enum_value = enum_root.xpath('./@value').text
         next if enum_api = enum_root.at_xpath('./@api') and enum_api != profile.base_api
+        next unless profile.enum_names.include? enum_name
 
         enums << GLEnum.new(enum_name, enum_group, enum_value)
     end
