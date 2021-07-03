@@ -239,8 +239,12 @@ def load_profile(reg, profile_path)
             raise "Extension #{ext_name} is not supported by the selected API (#{profile_api})"
         end
 
-        require_procs += ext.xpath('.//require//command/@name').map { |n| n.text }
-        require_procs -= ext.xpath('.//remove//command/@name').map { |n| n.text }
+        require_types += ext.xpath('.//require/type/@name').map { |n| n.text }.flatten
+        require_enums += ext.xpath('.//require/enum/@name').map { |n| n.text }.flatten
+        require_procs += ext.xpath('.//require//command/@name').map { |n| n.text }.flatten
+        require_types -= ext.xpath('.//remove//type/@name').map { |n| n.text }.flatten
+        require_enums -= ext.xpath('.//remove//enum/@name').map { |n| n.text }.flatten
+        require_procs -= ext.xpath('.//remove//command/@name').map { |n| n.text }.flatten
     end
 
     print "Finished discovering members for profile \"#{profile_api} #{profile_version}\""
