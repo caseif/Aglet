@@ -196,9 +196,9 @@ def load_profile(reg, profile_path)
     require_procs = []
 
     profile = File.open(profile_path) { |f| Nokogiri::XML(f) }
-    profile_api = profile.xpath('//profile/api/text()').text
+    profile_api = profile.xpath('//profile/api//name/text()').text
     profile_api_base = profile_api == 'glcore' ? 'gl' : profile_api
-    profile_version = profile.xpath('//profile//apiVersion/text()').text
+    profile_version = profile.xpath('//profile//api//version/text()').text
 
     req_major, req_minor = profile_version.split('.')
 

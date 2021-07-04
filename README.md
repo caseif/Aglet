@@ -31,13 +31,17 @@ Aglet requires a profile configuration in XML format in order to generate loader
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <profile>
-    <!-- The API to generate a loader for. Accepted strings are 'gl', 'glcore', 'gles1', 'gles2', and 'glsc'. -->
-    <api>glcore</api>
-    <!-- The version of the specified API to generate a loader for. Accepted values vary by API. -->
-    <apiVersion>3.3</apiVersion>
+    <api>
+        <!-- The API to generate a loader for. Accepted strings are 'gl', 'glcore', 'gles1', 'gles2', and 'glsc'. -->
+        <!-- Note that this does not constitute a minimum version. Aglet will not verify whether your context meets -->
+        <!-- a certain version requirement. -->
+        <name>glcore</name>
+        <!-- The version of the specified API to generate a loader for. Accepted values vary by API. -->
+        <version>3.3</version>
+    </api>
     <!-- A set of extensions to be loaded. The `required` attribute is optional and defaults to 'true'. -->
     <extensions>
-        <extension required="false">GL_ARB_debug_output</extension>
+        <extension required="false">GL_KHR_debug</extension>
     </extensions>
 </profile>
 ```
