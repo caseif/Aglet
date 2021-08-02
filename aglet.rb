@@ -433,6 +433,6 @@ FileUtils.mkdir_p source_out_path
 generate_header(aglet_header_out_path, profile, defs)
 generate_loader_source(source_out_path, profile, defs)
 
-khr_header_out_path = "#{aglet_header_out_path}/KHR"
+khr_header_out_path = "#{base_header_out_path}/KHR"
 FileUtils.mkdir_p khr_header_out_path
 FileUtils.cp(KHR_HEADER_PATH, "#{khr_header_out_path}/khrplatform.h")
