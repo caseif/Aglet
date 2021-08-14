@@ -14,13 +14,32 @@ def indent(str, cols)
     "#{indent_space}#{str.gsub(/\n(.)/, "\n#{indent_space}\\1")}"
 end
 
+API_GL = 'gl'
+API_GL_CORE = 'glcore'
+API_GLES = 'gles'
+API_GLSC = 'glsc'
+
+FEATURE_API_GL = 'gl'
+FEATURE_API_GLES_1 = 'gles1'
+FEATURE_API_GLES_2 = 'gles2'
+FEATURE_API_GLSC_2 = 'glsc2'
+
+TEMPLATE_PLACE_VERSIONS = 'api_versions'
+TEMPLATE_PLACE_TYPE_DEFS = 'type_defs'
+TEMPLATE_PLACE_ENUM_DEFS = 'enum_defs'
+TEMPLATE_PLACE_PROC_DEFS = 'proc_defs'
+TEMPLATE_PLACE_PROCS = 'procs'
+TEMPLATE_PLACE_EXTENSION_DEFS = 'ext_defs'
+TEMPLATE_PLACE_EXTENSIONS = 'extensions'
+
 GL_REGISTRY_PATH = "#{__dir__}/specs/OpenGL-Registry/xml/gl.xml"
 
 KHR_HEADER_PATH = "#{__dir__}/specs/EGL-Registry/api/KHR/khrplatform.h"
 
-C_HEADER_TEMPLATE_PATH = "#{__dir__}/templates/c/aglet.h"
-
-C_LOADER_TEMPLATE_PATH = "#{__dir__}/templates/c/aglet_loader.c"
+C_TEMPLATES_PATH = "#{__dir__}/templates/c"
+C_GL_TEMPLATES_PATH = "#{C_TEMPLATES_PATH}/gl"
+C_GL_HEADER_TEMPLATE_PATH = "#{C_GL_TEMPLATES_PATH}/aglet.h"
+C_GL_LOADER_TEMPLATE_PATH = "#{C_GL_TEMPLATES_PATH}/aglet_loader.c"
 
 class ProcParam
     def initialize(name, type)
@@ -102,9 +121,9 @@ class GLExtension
 end
 
 class GLProfile
-    def initialize(api, base_api, version, extensions, type_names, enum_names, proc_names)
+    def initialize(api, feature_api, version, extensions, type_names, enum_names, proc_names)
         @api = api
-        @base_api = base_api
+        @feature_api = feature_api
         @version = version
         @extensions = extensions
         @type_names = type_names
@@ -112,7 +131,7 @@ class GLProfile
         @proc_names = proc_names
     end
     attr_reader :api
-    attr_reader :base_api
+    attr_reader :feature_api
     attr_reader :version
     attr_reader :extensions
     attr_reader :type_names
@@ -200,16 +219,16 @@ def load_profile(reg, profile_path)
     profile_version = profile.xpath('//profile//api//version/text()').text
     
     profile_feature_api = profile_api
-    if profile_api == 'glcore'
-        profile_feature_api = 'gl'
-    elsif profile_api == 'gles'
+    if profile_api == API_GL_CORE
+        profile_feature_api = FEATURE_API_GL
+    elsif profile_api == API_GLES
         if profile_version.start_with? '1.'
-            profile_feature_api = 'gles1'
+            profile_feature_api = FEATURE_API_GLES_1
         else
-            profile_feature_api = 'gles2'
+            profile_feature_api = FEATURE_API_GLES_2
         end
-    elsif profile_api == 'glsc'
-        profile_feature_api = 'glsc2'
+    elsif profile_api == API_GLSC
+        profile_feature_api = FEATURE_API_GLSC_2
     end
 
     req_major, req_minor = profile_version.split('.')
@@ -223,11 +242,11 @@ def load_profile(reg, profile_path)
 
         seen_vers += 1
 
-        if profile_feature_api == 'gl'
-            if profile_api == 'glcore'
+        if profile_feature_api == FEATURE_API_GL
+            if profile_api == API_GL_CORE
                 require_secs = ver.css("require:not([profile]), require[profile='core']")
                 remove_secs = ver.css("remove:not([profile]), remove[profile='core']")
-            else profile_api == 'gl'
+            else profile_api == API_GL
                 require_secs = ver.css("require:not([profile]), require[profile='compatibility']")
                 remove_secs = ver.css("remove:not([profile]), remove[profile='compatibility']")
             end
@@ -288,12 +307,12 @@ def load_gl_members(reg, profile)
     enums = []
     procs = []
 
-    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile.base_api)
+    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile.feature_api)
     gl_feature_spec.each do |ver|
         feature_number = ver.xpath('@number').text
         feature_name = ver.xpath('@name').text
         feature_major, feature_minor = feature_number.split('.')
-        versions << GLVersion.new(profile.base_api, feature_name, feature_major, feature_minor)
+        versions << GLVersion.new(profile.feature_api, feature_name, feature_major, feature_minor)
     end
 
     req_procs = profile.proc_names
@@ -356,7 +375,7 @@ def load_gl_members(reg, profile)
         enum_name = enum_root.xpath('./@name').text
         enum_group = enum_root.xpath('./@group').text
         enum_value = enum_root.xpath('./@value').text
-        next if enum_api = enum_root.at_xpath('./@api') and enum_api != profile.base_api
+        next if enum_api = enum_root.at_xpath('./@api') and enum_api != profile.feature_api
         next unless profile.enum_names.include? enum_name
 
         enums << GLEnum.new(enum_name, enum_group, enum_value)
@@ -370,35 +389,38 @@ def generate_header(out_dir, profile, defs)
 
     subs_data = {}
 
-    subs_data['api_versions'] = []
+    subs_data[TEMPLATE_PLACE_VERSIONS] = []
     defs.versions.each do |v|
-        subs_data['api_versions'] << {name: v.name.upcase, major: v.major, minor: v.minor}
+        subs_data[TEMPLATE_PLACE_VERSIONS] << {name: v.name.upcase, major: v.major, minor: v.minor}
     end
 
-    subs_data['type_defs'] = []
+    subs_data[TEMPLATE_PLACE_TYPE_DEFS] = []
     defs.types.each do |t|
-        subs_data['type_defs'] << {name: t.name, typedef: t.typedef}
+        subs_data[TEMPLATE_PLACE_TYPE_DEFS] << {name: t.name, typedef: t.typedef}
     end
 
-    subs_data['enum_defs'] = []
+    subs_data[TEMPLATE_PLACE_ENUM_DEFS] = []
     defs.enums.group_by { |e| e.group }.each do |name, group|
         group.each do |e|
-            subs_data['enum_defs'] << {name: e.name, value: e.value}
+            subs_data[TEMPLATE_PLACE_ENUM_DEFS] << {name: e.name, value: e.value}
         end
     end
     
-    subs_data['proc_defs'] = []
+    subs_data[TEMPLATE_PLACE_PROC_DEFS] = []
     defs.procs.each do |p|
-        subs_data['proc_defs'] << {name: p.name, name_upper: p.name.upcase, ret_type: p.ret_type,
+        subs_data[TEMPLATE_PLACE_PROC_DEFS] << {name: p.name, name_upper: p.name.upcase, ret_type: p.ret_type,
             params: p.params.map { |p| p.gen_c }.join(', ')}
     end
     
-    subs_data['ext_defs'] = []
+    subs_data[TEMPLATE_PLACE_EXTENSION_DEFS] = []
     profile.extensions.each do |e|
-        subs_data['ext_defs'] << {name: e.name}
+        subs_data[TEMPLATE_PLACE_EXTENSION_DEFS] << {name: e.name}
     end
-    
-    out_file << gen_from_template(C_HEADER_TEMPLATE_PATH, subs_data)
+
+    #TODO: consider API and generator language
+    header_template_path = C_GL_HEADER_TEMPLATE_PATH
+
+    out_file << gen_from_template(header_template_path, subs_data)
     return
 end
 
@@ -409,22 +431,25 @@ def generate_loader_source(out_dir, profile, defs)
 
     subs_data = {}
 
-    subs_data['api_versions'] = []
+    subs_data[TEMPLATE_PLACE_VERSIONS] = []
     defs.versions.each do |v|
-        subs_data['api_versions'] << {name: v.name, major: v.major, minor: v.minor}
+        subs_data[TEMPLATE_PLACE_VERSIONS] << {name: v.name, major: v.major, minor: v.minor}
     end
     
-    subs_data['extensions'] = []
+    subs_data[TEMPLATE_PLACE_EXTENSIONS] = []
     profile.extensions.each do |e|
-        subs_data['extensions'] << {name: e.name}
+        subs_data[TEMPLATE_PLACE_EXTENSIONS] << {name: e.name}
     end
 
-    subs_data['procs'] = []
+    subs_data[TEMPLATE_PLACE_PROCS] = []
     defs.procs.each do |p|
-        subs_data['procs'] << {name: p.name, name_upper: p.name.upcase}
+        subs_data[TEMPLATE_PLACE_PROCS] << {name: p.name, name_upper: p.name.upcase}
     end
 
-    out_file << gen_from_template(C_LOADER_TEMPLATE_PATH, subs_data)
+    #TODO: consider API and generator language
+    loader_template_path = C_GL_LOADER_TEMPLATE_PATH
+
+    out_file << gen_from_template(loader_template_path, subs_data)
 end
 
 def generate_trampolines_amd64(out_dir, defs)
@@ -442,12 +467,14 @@ end
 
 args = parse_args
 
-reg = File.open(GL_REGISTRY_PATH) { |f| Nokogiri::XML(f) }
-
 profile = load_profile(reg, args[:profile])
 if profile.nil?
     exit(1)
 end
+
+reg_path = GL_REGISTRY_PATH
+
+reg = File.open(reg_path) { |f| Nokogiri::XML(f) }
 
 defs = load_gl_members(reg, profile)
 
