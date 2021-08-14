@@ -12,17 +12,17 @@
 extern "C" {
 #endif
 
-%= foreach api_versions =%
+#= foreach api_versions =#
 int AGLET_@{name} = 0;
-%= /foreach =%
+#= /foreach =#
 
-%= foreach extensions =%
+#= foreach extensions =#
 int AGLET_@{name} = 0;
-%= /foreach =%
+#= /foreach =#
 
-%= foreach procs =%
+#= foreach procs =#
 PFN@{name_upper}PROC aglet_@{name} = NULL;
-%= /foreach =%
+#= /foreach =#
 
 static int _load_versions(AgletLoadProc load_proc) {
     const GLenum(*glGetError)() = load_proc("glGetError");
@@ -52,9 +52,9 @@ static int _load_versions(AgletLoadProc load_proc) {
             return AGLET_ERROR_GL_ERROR;
         }
 
-        %= foreach api_versions =%
+        #= foreach api_versions =#
         AGLET_@{name} = (ver_major > @{major} || (ver_major == @{major} && ver_minor >= @{minor})) ? 1 : 0;
-        %= /foreach =%
+        #= /foreach =#
 
         return 0;
     } else if (glErr != GL_INVALID_ENUM) {
@@ -109,9 +109,9 @@ static int _load_versions(AgletLoadProc load_proc) {
     int parsed_major = atoi(major_str);
     int parsed_minor = atoi(minor_str);
 
-    %= foreach api_versions =%
+    #= foreach api_versions =#
     AGLET_@{name} = (parsed_major > @{major} || (parsed_major == @{major} && parsed_minor >= @{minor})) ? 1 : 0;
-    %= /foreach =%
+    #= /foreach =#
 
     return 0;
 }
@@ -135,12 +135,12 @@ static int _load_extensions(AgletLoadProc load_proc) {
             const char *cur_ext = (const char *) glGetStringi(GL_EXTENSIONS, i);
             const size_t cur_len = strlen(cur_ext);
 
-            %= foreach extensions =%
+            #= foreach extensions =#
             if (strlen("@{name}") == cur_len && strncmp(cur_ext, "@{name}", cur_len) == 0) {
                 AGLET_@{name} = 1;
                 continue;
             }
-            %= /foreach =%
+            #= /foreach =#
         }
 
         return 0;
@@ -176,12 +176,12 @@ static int _load_extensions(AgletLoadProc load_proc) {
             continue;
         }
 
-        %= foreach extensions =%
+        #= foreach extensions =#
         if (strlen("@{name}") == cur_len && strncmp(cur_ext, "@{name}", cur_len) == 0) {
             AGLET_@{name} = 1;
             continue;
         }
-        %= /foreach =%
+        #= /foreach =#
     }
 
     return 0;
@@ -190,12 +190,12 @@ static int _load_extensions(AgletLoadProc load_proc) {
 static int _check_required_extensions() {
     bool missing_ext = false;
 
-    %= foreach extensions =%
+    #= foreach extensions =#
     if (!AGLET_@{name}) {
         fprintf(stderr, "[Aglet] Required extension @{name} is not available\n");
         missing_ext = true;
     }
-    %= /foreach =%
+    #= /foreach =#
 
     if (missing_ext) {
         return AGLET_ERROR_MISSING_EXTENSION;
@@ -205,9 +205,9 @@ static int _check_required_extensions() {
 }
 
 static int _load_procs(AgletLoadProc load_proc) {
-    %= foreach procs =%
+    #= foreach procs =#
     aglet_@{name} = load_proc("@{name}");
-    %= /foreach =%
+    #= /foreach =#
 
     return 0;
 }

@@ -154,7 +154,7 @@ def gen_from_template(template_path, subs_data)
 
     last_off = 0
 
-    sec_templates = template_content.to_enum(:scan, /(?<start>[ \t]*%)\= foreach (?<name>.*?) \=%\n(?<content>.*?)\n[ \t]*%\= \/foreach \=%(?<end>\n)/m).map { Regexp.last_match }
+    sec_templates = template_content.to_enum(:scan, /(?<start>[ \t]*#)\= foreach (?<name>.*?) \=#\n(?<content>.*?)\n[ \t]*#\= \/foreach \=#(?<end>\n)/m).map { Regexp.last_match }
     sec_templates.each do |s|
         sec_start = s.offset(:start)[0] - 1
         sec_end = s.end(:end)
@@ -467,14 +467,14 @@ end
 
 args = parse_args
 
+reg_path = GL_REGISTRY_PATH
+
+reg = File.open(reg_path) { |f| Nokogiri::XML(f) }
+
 profile = load_profile(reg, args[:profile])
 if profile.nil?
     exit(1)
 end
-
-reg_path = GL_REGISTRY_PATH
-
-reg = File.open(reg_path) { |f| Nokogiri::XML(f) }
 
 defs = load_gl_members(reg, profile)
 
