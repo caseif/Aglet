@@ -197,23 +197,43 @@ def load_profile(reg, profile_path)
 
     profile = File.open(profile_path) { |f| Nokogiri::XML(f) }
     profile_api = profile.xpath('//profile/api//name/text()').text
-    profile_api_base = profile_api == 'glcore' ? 'gl' : profile_api
     profile_version = profile.xpath('//profile//api//version/text()').text
+    
+    profile_feature_api = profile_api
+    if profile_api == 'glcore'
+        profile_feature_api = 'gl'
+    elsif profile_api == 'gles'
+        if profile_version.start_with? '1.'
+            profile_feature_api = 'gles1'
+        else
+            profile_feature_api = 'gles2'
+        end
+    elsif profile_api == 'glsc'
+        profile_feature_api = 'glsc2'
+    end
 
     req_major, req_minor = profile_version.split('.')
 
-    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile_api_base)
+    seen_vers = 0
+    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile_feature_api)
     gl_feature_spec.each do |ver|
         feature_number = ver.xpath('@number').text
         feature_major, feature_minor = feature_number.split('.')
         next if feature_major > req_major or (feature_major == req_major and feature_minor > req_minor)
 
-        if profile_api == 'glcore'
-            require_secs = ver.css("require:not([profile]), require[profile='core']")
-            remove_secs = ver.css("remove:not([profile]), remove[profile='core']")
-        elsif profile_api == 'gl'
-            require_secs = ver.css("require:not([profile]), require[profile='compatibility']")
-            remove_secs = ver.css("remove:not([profile]), remove[profile='compatibility']")
+        seen_vers += 1
+
+        if profile_feature_api == 'gl'
+            if profile_api == 'glcore'
+                require_secs = ver.css("require:not([profile]), require[profile='core']")
+                remove_secs = ver.css("remove:not([profile]), remove[profile='core']")
+            else profile_api == 'gl'
+                require_secs = ver.css("require:not([profile]), require[profile='compatibility']")
+                remove_secs = ver.css("remove:not([profile]), remove[profile='compatibility']")
+            end
+        else
+            require_secs = ver.xpath('./require')
+            remove_secs = ver.xpath('./remove')
         end
 
         require_types += require_secs.xpath('.//type/@name').map { |n| n.text }.flatten
@@ -223,6 +243,11 @@ def load_profile(reg, profile_path)
         require_types -= remove_secs.xpath('.//type/@name').map { |n| n.text }.flatten
         require_enums -= remove_secs.xpath('.//enum/@name').map { |n| n.text }.flatten
         require_procs -= remove_secs.xpath('.//command/@name').map { |n| n.text }.flatten
+    end
+
+    if seen_vers == 0
+        print "Requested profile does not seem to include any defined versions\n"
+        return nil
     end
 
     profile_extensions = profile.xpath('//profile//extensions//extension')
@@ -250,7 +275,7 @@ def load_profile(reg, profile_path)
     print "Finished discovering members for profile \"#{profile_api} #{profile_version}\""
     print " (#{require_types.length} types, #{require_enums.length} enums, #{require_procs.length} functions)\n"
 
-    return GLProfile.new(profile_api, profile_api_base, profile_version, profile_extensions, require_types.to_set, require_enums.to_set, require_procs.to_set)
+    return GLProfile.new(profile_api, profile_feature_api, profile_version, profile_extensions, require_types.to_set, require_enums.to_set, require_procs.to_set)
 end
 
 def parse_param_type(raw)
@@ -420,6 +445,10 @@ args = parse_args
 reg = File.open(GL_REGISTRY_PATH) { |f| Nokogiri::XML(f) }
 
 profile = load_profile(reg, args[:profile])
+if profile.nil?
+    exit(1)
+end
+
 defs = load_gl_members(reg, profile)
 
 out_path = args[:output]
