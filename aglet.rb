@@ -461,19 +461,6 @@ def generate_loader_source(out_dir, profile, defs)
     out_file << gen_from_template(loader_template_path, subs_data)
 end
 
-def generate_trampolines_amd64(out_dir, defs)
-    procs = defs.procs
-
-    out_file = File.open("#{out_dir}/aglet_trampolines.s", 'w')
-
-    out_file << TRAMPOLINES_HEADER_AMD64
-
-    procs.each_with_index do |proc, i|
-        out_file << "\n"
-        out_file << TRAMPOLINE_TEMPLATE_AMD64 % [name: proc.name, index: i]
-    end
-end
-
 args = parse_args
 
 profile = load_profile(args[:profile])
