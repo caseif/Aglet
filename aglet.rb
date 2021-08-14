@@ -24,6 +24,8 @@ FEATURE_API_GLES_1 = 'gles1'
 FEATURE_API_GLES_2 = 'gles2'
 FEATURE_API_GLSC_2 = 'glsc2'
 
+API_FAMILY_GL = 'gl'
+
 TEMPLATE_PLACE_VERSIONS = 'api_versions'
 TEMPLATE_PLACE_TYPE_DEFS = 'type_defs'
 TEMPLATE_PLACE_ENUM_DEFS = 'enum_defs'
@@ -33,6 +35,7 @@ TEMPLATE_PLACE_EXTENSION_DEFS = 'ext_defs'
 TEMPLATE_PLACE_EXTENSIONS = 'extensions'
 
 GL_REGISTRY_PATH = "#{__dir__}/specs/OpenGL-Registry/xml/gl.xml"
+VK_REGISTRY_PATH = "#{__dir__}/specs/OpenGL-Registry/xml/gl.xml"
 
 KHR_HEADER_PATH = "#{__dir__}/specs/EGL-Registry/api/KHR/khrplatform.h"
 
@@ -54,7 +57,7 @@ class ProcParam
     end
 end
 
-class GLVersion
+class ApiVersion
     def initialize(api, name, major, minor)
         @api = api
         @name = name
@@ -67,7 +70,7 @@ class GLVersion
     attr_reader :minor
 end
 
-class GLProc
+class ApiProc
     def initialize(name, ret_type, params)
         @name = name
         @ret_type = ret_type
@@ -78,7 +81,7 @@ class GLProc
     attr_reader :params
 end
 
-class GLType
+class ApiType
     def initialize(name, typedef)
         @name = name
         @typedef = typedef
@@ -87,7 +90,7 @@ class GLType
     attr_reader :typedef
 end
 
-class GLEnum
+class ApiEnum
     def initialize(name, group, value)
         @name = name
         @group = group
@@ -98,7 +101,7 @@ class GLEnum
     attr_reader :value
 end
 
-class GLDefs
+class ApiDefs
     def initialize(versions, types, enums, procs)
         @versions = versions
         @types = types
@@ -111,7 +114,7 @@ class GLDefs
     attr_reader :procs
 end
 
-class GLExtension
+class ApiExtension
     def initialize(name, required)
         @name = name
         @required = required
@@ -120,20 +123,22 @@ class GLExtension
     attr_reader :required
 end
 
-class GLProfile
-    def initialize(api, feature_api, version, extensions)
+class ApiProfile
+    def initialize(api, feature_api, api_family, version, extensions)
         @api = api
         @feature_api = feature_api
+        @api_family = api_family
         @version = version
         @extensions = extensions
     end
     attr_reader :api
     attr_reader :feature_api
+    attr_reader :api_family
     attr_reader :version
     attr_reader :extensions
 end
 
-class GLMembers
+class ApiMembers
     def initialize(type_names, enum_names, proc_names)
         @type_names = type_names
         @enum_names = enum_names
@@ -219,23 +224,30 @@ def load_profile(profile_path)
     api = profile.xpath('//profile/api//name/text()').text
     version = profile.xpath('//profile//api//version/text()').text
 
-    feature_api = api
-    if api == API_GL_CORE
+    feature_api = ''
+    api_family = ''
+    if api == API_GL_CORE or api == API_GL
         feature_api = FEATURE_API_GL
+        api_family = API_FAMILY_GL
     elsif api == API_GLES
         if version.start_with? '1.'
             feature_api = FEATURE_API_GLES_1
         else
             feature_api = FEATURE_API_GLES_2
         end
+        api_family = API_FAMILY_GL
     elsif api == API_GLSC
         feature_api = FEATURE_API_GLSC_2
+        api_family = API_FAMILY_GL
+    else
+        print "Unrecognized API '#{api}'\n"
+        return nil
     end
 
     extensions = profile.xpath('//profile//extensions//extension')
-        .map { |e| GLExtension.new(e.text, e.at_xpath('./@required').to_s.downcase == 'true') }
+        .map { |e| ApiExtension.new(e.text, e.at_xpath('./@required').to_s.downcase == 'true') }
 
-    return GLProfile.new(api, feature_api, version, extensions)
+    return ApiProfile.new(api, feature_api, api_family, version, extensions)
 end
 
 def load_profile_members(reg, profile)
@@ -303,7 +315,7 @@ def load_profile_members(reg, profile)
     print "Finished discovering members for profile \"#{profile.api} #{profile.version}\""
     print " (#{require_types.length} types, #{require_enums.length} enums, #{require_procs.length} functions)\n"
 
-    return GLMembers.new(require_types.to_set, require_enums.to_set, require_procs.to_set)
+    return ApiMembers.new(require_types.to_set, require_enums.to_set, require_procs.to_set)
 end
 
 def parse_param_type(raw)
@@ -321,7 +333,7 @@ def load_gl_defs(reg, profile, members)
         feature_number = ver.xpath('@number').text
         feature_name = ver.xpath('@name').text
         feature_major, feature_minor = feature_number.split('.')
-        versions << GLVersion.new(profile.feature_api, feature_name, feature_major, feature_minor)
+        versions << ApiVersion.new(profile.feature_api, feature_name, feature_major, feature_minor)
     end
 
     req_procs = members.proc_names
@@ -359,7 +371,7 @@ def load_gl_defs(reg, profile, members)
             params << ProcParam.new(param_name.strip, param_type)
         end
 
-        procs << GLProc.new(name, ret, params)
+        procs << ApiProc.new(name, ret, params)
     end
 
     req_types = members.type_names + extra_types
@@ -370,14 +382,15 @@ def load_gl_defs(reg, profile, members)
 
     reg.xpath('//registry//types/type').each do |type_root|
         next if name_attr = type_root.at_xpath('./@name') and
-            (name_attr.text == 'khrplatform' or name_attr.text == 'GLhandleARB')
+            (name_attr.text == 'khrplatform' or
+                (profile.api_family == API_FAMILY_GL and name_attr.text == 'GLhandleARB'))
 
         type_name = type_root.xpath('.//name').text
         next unless req_types.include? type_name
         # bad idea to parse XML with regex, but this is extremely domain-specific
         type_typedef = type_root.to_s.gsub('<apientry/>', 'APIENTRY').gsub(/<.*?>/, '')
 
-        types << GLType.new(type_name, type_typedef)
+        types << ApiType.new(type_name, type_typedef)
     end
 
     reg.xpath('//registry//enums/enum').each do |enum_root|
@@ -387,10 +400,10 @@ def load_gl_defs(reg, profile, members)
         next if enum_api = enum_root.at_xpath('./@api') and enum_api != profile.feature_api
         next unless members.enum_names.include? enum_name
 
-        enums << GLEnum.new(enum_name, enum_group, enum_value)
+        enums << ApiEnum.new(enum_name, enum_group, enum_value)
     end
 
-    GLDefs.new(versions, types, enums, procs)
+    ApiDefs.new(versions, types, enums, procs)
 end
 
 def generate_header(out_dir, profile, defs)
@@ -464,6 +477,9 @@ end
 args = parse_args
 
 profile = load_profile(args[:profile])
+if profile.nil?
+    exit(1)
+end
 
 reg_path = GL_REGISTRY_PATH
 
