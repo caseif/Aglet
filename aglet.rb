@@ -121,19 +121,24 @@ class GLExtension
 end
 
 class GLProfile
-    def initialize(api, feature_api, version, extensions, type_names, enum_names, proc_names)
+    def initialize(api, feature_api, version, extensions)
         @api = api
         @feature_api = feature_api
         @version = version
         @extensions = extensions
-        @type_names = type_names
-        @enum_names = enum_names
-        @proc_names = proc_names
     end
     attr_reader :api
     attr_reader :feature_api
     attr_reader :version
     attr_reader :extensions
+end
+
+class GLMembers
+    def initialize(type_names, enum_names, proc_names)
+        @type_names = type_names
+        @enum_names = enum_names
+        @proc_names = proc_names
+    end
     attr_reader :type_names
     attr_reader :enum_names
     attr_reader :proc_names
@@ -209,32 +214,39 @@ def parse_args()
     options
 end
 
-def load_profile(reg, profile_path)
+def load_profile(profile_path)
+    profile = File.open(profile_path) { |f| Nokogiri::XML(f) }
+    api = profile.xpath('//profile/api//name/text()').text
+    version = profile.xpath('//profile//api//version/text()').text
+
+    feature_api = api
+    if api == API_GL_CORE
+        feature_api = FEATURE_API_GL
+    elsif api == API_GLES
+        if version.start_with? '1.'
+            feature_api = FEATURE_API_GLES_1
+        else
+            feature_api = FEATURE_API_GLES_2
+        end
+    elsif api == API_GLSC
+        feature_api = FEATURE_API_GLSC_2
+    end
+
+    extensions = profile.xpath('//profile//extensions//extension')
+        .map { |e| GLExtension.new(e.text, e.at_xpath('./@required').to_s.downcase == 'true') }
+
+    return GLProfile.new(api, feature_api, version, extensions)
+end
+
+def load_profile_members(reg, profile)
     require_types = []
     require_enums = []
     require_procs = []
 
-    profile = File.open(profile_path) { |f| Nokogiri::XML(f) }
-    profile_api = profile.xpath('//profile/api//name/text()').text
-    profile_version = profile.xpath('//profile//api//version/text()').text
-    
-    profile_feature_api = profile_api
-    if profile_api == API_GL_CORE
-        profile_feature_api = FEATURE_API_GL
-    elsif profile_api == API_GLES
-        if profile_version.start_with? '1.'
-            profile_feature_api = FEATURE_API_GLES_1
-        else
-            profile_feature_api = FEATURE_API_GLES_2
-        end
-    elsif profile_api == API_GLSC
-        profile_feature_api = FEATURE_API_GLSC_2
-    end
-
-    req_major, req_minor = profile_version.split('.')
+    req_major, req_minor = profile.version.split('.')
 
     seen_vers = 0
-    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile_feature_api)
+    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile.feature_api)
     gl_feature_spec.each do |ver|
         feature_number = ver.xpath('@number').text
         feature_major, feature_minor = feature_number.split('.')
@@ -242,11 +254,11 @@ def load_profile(reg, profile_path)
 
         seen_vers += 1
 
-        if profile_feature_api == FEATURE_API_GL
-            if profile_api == API_GL_CORE
+        if profile.feature_api == FEATURE_API_GL
+            if profile.api == API_GL_CORE
                 require_secs = ver.css("require:not([profile]), require[profile='core']")
                 remove_secs = ver.css("remove:not([profile]), remove[profile='core']")
-            else profile_api == API_GL
+            else profile.api == API_GL
                 require_secs = ver.css("require:not([profile]), require[profile='compatibility']")
                 remove_secs = ver.css("remove:not([profile]), remove[profile='compatibility']")
             end
@@ -269,18 +281,15 @@ def load_profile(reg, profile_path)
         return nil
     end
 
-    profile_extensions = profile.xpath('//profile//extensions//extension')
-        .map { |e| GLExtension.new(e.text, e.at_xpath('./@required').to_s.downcase == 'true') }
-
-    ext_names = profile_extensions.map { |e| e.name }
+    ext_names = profile.extensions.map { |e| e.name }
 
     reg.xpath('//registry//extensions//extension').each do |ext|
         ext_name = ext.xpath('@name').text
         next unless ext_names.include? ext_name
 
         supported = ext.xpath('@supported').text
-        if supported != nil and not supported.split('|').include? profile_api
-            raise "Extension #{ext_name} is not supported by the selected API (#{profile_api})"
+        if supported != nil and not supported.split('|').include? profile.api
+            raise "Extension #{ext_name} is not supported by the selected API (#{profile.api})"
         end
 
         require_types += ext.xpath('.//require/type/@name').map { |n| n.text }.flatten
@@ -291,17 +300,17 @@ def load_profile(reg, profile_path)
         require_procs -= ext.xpath('.//remove//command/@name').map { |n| n.text }.flatten
     end
 
-    print "Finished discovering members for profile \"#{profile_api} #{profile_version}\""
+    print "Finished discovering members for profile \"#{profile.api} #{profile.version}\""
     print " (#{require_types.length} types, #{require_enums.length} enums, #{require_procs.length} functions)\n"
 
-    return GLProfile.new(profile_api, profile_feature_api, profile_version, profile_extensions, require_types.to_set, require_enums.to_set, require_procs.to_set)
+    return GLMembers.new(require_types.to_set, require_enums.to_set, require_procs.to_set)
 end
 
 def parse_param_type(raw)
     raw.gsub(/<name>.*<\/name>/, '').gsub(/<\/?ptype>/, '').gsub('* ', ' *')
 end
 
-def load_gl_members(reg, profile)
+def load_gl_defs(reg, profile, members)
     versions = []
     types = []
     enums = []
@@ -315,7 +324,7 @@ def load_gl_members(reg, profile)
         versions << GLVersion.new(profile.feature_api, feature_name, feature_major, feature_minor)
     end
 
-    req_procs = profile.proc_names
+    req_procs = members.proc_names
 
     extra_types = Set[]
 
@@ -353,9 +362,9 @@ def load_gl_members(reg, profile)
         procs << GLProc.new(name, ret, params)
     end
 
-    req_types = profile.type_names + extra_types
+    req_types = members.type_names + extra_types
 
-    print "Discovered #{req_types.length - profile.type_names.length} additional types\n"
+    print "Discovered #{req_types.length - members.type_names.length} additional types\n"
 
     more_types = Set[]
 
@@ -376,7 +385,7 @@ def load_gl_members(reg, profile)
         enum_group = enum_root.xpath('./@group').text
         enum_value = enum_root.xpath('./@value').text
         next if enum_api = enum_root.at_xpath('./@api') and enum_api != profile.feature_api
-        next unless profile.enum_names.include? enum_name
+        next unless members.enum_names.include? enum_name
 
         enums << GLEnum.new(enum_name, enum_group, enum_value)
     end
@@ -405,13 +414,13 @@ def generate_header(out_dir, profile, defs)
             subs_data[TEMPLATE_PLACE_ENUM_DEFS] << {name: e.name, value: e.value}
         end
     end
-    
+
     subs_data[TEMPLATE_PLACE_PROC_DEFS] = []
     defs.procs.each do |p|
         subs_data[TEMPLATE_PLACE_PROC_DEFS] << {name: p.name, name_upper: p.name.upcase, ret_type: p.ret_type,
             params: p.params.map { |p| p.gen_c }.join(', ')}
     end
-    
+
     subs_data[TEMPLATE_PLACE_EXTENSION_DEFS] = []
     profile.extensions.each do |e|
         subs_data[TEMPLATE_PLACE_EXTENSION_DEFS] << {name: e.name}
@@ -435,7 +444,7 @@ def generate_loader_source(out_dir, profile, defs)
     defs.versions.each do |v|
         subs_data[TEMPLATE_PLACE_VERSIONS] << {name: v.name, major: v.major, minor: v.minor}
     end
-    
+
     subs_data[TEMPLATE_PLACE_EXTENSIONS] = []
     profile.extensions.each do |e|
         subs_data[TEMPLATE_PLACE_EXTENSIONS] << {name: e.name}
@@ -467,16 +476,18 @@ end
 
 args = parse_args
 
+profile = load_profile(args[:profile])
+
 reg_path = GL_REGISTRY_PATH
 
 reg = File.open(reg_path) { |f| Nokogiri::XML(f) }
 
-profile = load_profile(reg, args[:profile])
-if profile.nil?
+profile_members = load_profile_members(reg, profile)
+if profile_members.nil?
     exit(1)
 end
 
-defs = load_gl_members(reg, profile)
+defs = load_gl_defs(reg, profile, profile_members)
 
 out_path = args[:output]
 base_header_out_path = "#{out_path}/include"
