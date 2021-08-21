@@ -436,7 +436,7 @@ def generate_header(out_dir, profile, defs)
 
     subs_data[TEMPLATE_PLACE_EXTENSION_DEFS] = []
     profile.extensions.each do |e|
-        subs_data[TEMPLATE_PLACE_EXTENSION_DEFS] << {name: e.name}
+        subs_data[TEMPLATE_PLACE_EXTENSION_DEFS] << {name: e.name, required: e.required.to_s}
     end
 
     #TODO: consider API and generator language
@@ -460,7 +460,7 @@ def generate_loader_source(out_dir, profile, defs)
 
     subs_data[TEMPLATE_PLACE_EXTENSIONS] = []
     profile.extensions.each do |e|
-        subs_data[TEMPLATE_PLACE_EXTENSIONS] << {name: e.name}
+        subs_data[TEMPLATE_PLACE_EXTENSIONS] << {name: e.name, required: e.required.to_s}
     end
 
     subs_data[TEMPLATE_PLACE_PROCS] = []
