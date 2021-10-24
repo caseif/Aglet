@@ -25,30 +25,30 @@ PFN@{name_upper}PROC aglet_@{name} = NULL;
 #= /foreach =#
 
 static int _load_versions(AgletLoadProc load_proc) {
-    const GLenum(*glGetError)() = load_proc("glGetError");
-    if (glGetError == NULL) {
+    const GLenum(*local_glGetError)() = load_proc("glGetError");
+    if (local_glGetError == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
 
     #ifdef GL_MAJOR_VERSION
-    void (*glGetIntegerv)(GLenum, GLint*) = load_proc("glGetIntegerv");
+    void (*local_glGetIntegerv)(GLenum, GLint*) = load_proc("glGetIntegerv");
 
-    if (glGetIntegerv == NULL) {
+    if (local_glGetIntegerv == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
 
-    int glErr = glGetError();
+    int glErr = local_glGetError();
     if (glErr == GL_NO_ERROR) {
         int ver_major;
         int ver_minor;
 
-        glGetIntegerv(GL_MAJOR_VERSION, &ver_major);
-        if (glGetError() != GL_NO_ERROR) {
+        local_glGetIntegerv(GL_MAJOR_VERSION, &ver_major);
+        if (local_glGetError() != GL_NO_ERROR) {
             return AGLET_ERROR_GL_ERROR;
         }
 
-        glGetIntegerv(GL_MINOR_VERSION, &ver_minor);
-        if (glGetError() != GL_NO_ERROR) {
+        local_glGetIntegerv(GL_MINOR_VERSION, &ver_minor);
+        if (local_glGetError() != GL_NO_ERROR) {
             return AGLET_ERROR_GL_ERROR;
         }
 
@@ -64,13 +64,13 @@ static int _load_versions(AgletLoadProc load_proc) {
     
     // fallback section
 
-    const GLubyte *(*glGetString)(GLenum name) = load_proc("glGetString");
-    if (glGetString == NULL) {
+    const GLubyte *(*local_glGetString)(GLenum name) = load_proc("glGetString");
+    if (local_glGetString == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
 
-    const char *ver_str = (const char *) glGetString(GL_VERSION);
-    if (glGetError() != GL_NO_ERROR || ver_str == NULL) {
+    const char *ver_str = (const char *) local_glGetString(GL_VERSION);
+    if (local_glGetError() != GL_NO_ERROR || ver_str == NULL) {
         return AGLET_ERROR_GL_ERROR;
     }
 
@@ -117,22 +117,22 @@ static int _load_versions(AgletLoadProc load_proc) {
 }
 
 static int _load_extensions(AgletLoadProc load_proc) {
-    const GLenum(*glGetError)() = load_proc("glGetError");
-    if (glGetError == NULL) {
+    const GLenum(*local_glGetError)() = load_proc("glGetError");
+    if (local_glGetError == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
 
     #ifdef GL_NUM_EXTENSIONS
-    const GLubyte *(*glGetStringi)(GLenum name, GLuint index) = load_proc("glGetStringi");
-    void (*glGetIntegerv)(GLenum, GLint*) = load_proc("glGetIntegerv");
-    if (glGetStringi != NULL && glGetIntegerv != NULL) {
+    const GLubyte *(*local_glGetStringi)(GLenum name, GLuint index) = load_proc("glGetStringi");
+    void (*local_glGetIntegerv)(GLenum, GLint*) = load_proc("glGetIntegerv");
+    if (local_glGetStringi != NULL && local_glGetIntegerv != NULL) {
         int num_exts = 0;
-        glGetIntegerv(GL_NUM_EXTENSIONS, &num_exts);
+        local_glGetIntegerv(GL_NUM_EXTENSIONS, &num_exts);
         
-        int gl_err = glGetError();
+        int gl_err = local_glGetError();
         if (gl_err == GL_NO_ERROR) {
         for (int i = 0; i < num_exts; i++) {
-            const char *cur_ext = (const char *) glGetStringi(GL_EXTENSIONS, i);
+            const char *cur_ext = (const char *) local_glGetStringi(GL_EXTENSIONS, i);
             const size_t cur_len = strlen(cur_ext);
 
             #= foreach extensions =#
@@ -152,14 +152,14 @@ static int _load_extensions(AgletLoadProc load_proc) {
 
     // fallback section
 
-    const GLubyte *(*glGetString)(GLenum name) = load_proc("glGetString");
+    const GLubyte *(*local_glGetString)(GLenum name) = load_proc("glGetString");
 
-    if (glGetString == NULL) {
+    if (local_glGetString == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
 
-    const char *exts_str = (const char *) glGetString(GL_EXTENSIONS);
-    int glErr = glGetError();
+    const char *exts_str = (const char *) local_glGetString(GL_EXTENSIONS);
+    int glErr = local_glGetError();
     if (glErr != GL_NO_ERROR) {
         return glErr;
     }
@@ -210,7 +210,7 @@ static int _check_required_extensions() {
 
 static int _load_procs(AgletLoadProc load_proc) {
     #= foreach procs =#
-    aglet_@{name} = load_proc("@{name}");
+    aglet_@{name} = (PFN@{name_upper}PROC) load_proc("@{name}");
     #= /foreach =#
 
     return 0;
