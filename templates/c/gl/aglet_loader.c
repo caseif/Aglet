@@ -25,13 +25,13 @@ PFN@{name_upper}PROC aglet_@{name} = NULL;
 #= /foreach =#
 
 static int _load_versions(AgletLoadProc load_proc) {
-    const GLenum(*local_glGetError)() = load_proc("glGetError");
+    GLenum(*local_glGetError)() = (GLenum(*)()) load_proc("glGetError");
     if (local_glGetError == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
 
     #ifdef GL_MAJOR_VERSION
-    void (*local_glGetIntegerv)(GLenum, GLint*) = load_proc("glGetIntegerv");
+    void (*local_glGetIntegerv)(GLenum, GLint*) = (void(*)(GLenum, GLint*)) load_proc("glGetIntegerv");
 
     if (local_glGetIntegerv == NULL) {
         return AGLET_ERROR_PROC_LOAD;
@@ -64,7 +64,7 @@ static int _load_versions(AgletLoadProc load_proc) {
     
     // fallback section
 
-    const GLubyte *(*local_glGetString)(GLenum name) = load_proc("glGetString");
+    const GLubyte *(*local_glGetString)(GLenum name) = (const GLubyte*(*)(GLenum)) load_proc("glGetString");
     if (local_glGetString == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
@@ -117,14 +117,14 @@ static int _load_versions(AgletLoadProc load_proc) {
 }
 
 static int _load_extensions(AgletLoadProc load_proc) {
-    const GLenum(*local_glGetError)() = load_proc("glGetError");
+    GLenum(*local_glGetError)() = (const GLenum(*)()) load_proc("glGetError");
     if (local_glGetError == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
 
     #ifdef GL_NUM_EXTENSIONS
-    const GLubyte *(*local_glGetStringi)(GLenum name, GLuint index) = load_proc("glGetStringi");
-    void (*local_glGetIntegerv)(GLenum, GLint*) = load_proc("glGetIntegerv");
+    const GLubyte *(*local_glGetStringi)(GLenum name, GLuint index) = (const GLubyte*(*)(GLenum, GLuint)) load_proc("glGetStringi");
+    void (*local_glGetIntegerv)(GLenum, GLint*) = (void(*)(GLenum, GLint*)) (void(*)(GLenum, GLint*)) load_proc("glGetIntegerv");
     if (local_glGetStringi != NULL && local_glGetIntegerv != NULL) {
         int num_exts = 0;
         local_glGetIntegerv(GL_NUM_EXTENSIONS, &num_exts);
@@ -152,7 +152,7 @@ static int _load_extensions(AgletLoadProc load_proc) {
 
     // fallback section
 
-    const GLubyte *(*local_glGetString)(GLenum name) = load_proc("glGetString");
+    const GLubyte *(*local_glGetString)(GLenum name) = (const GLubyte*(*)(GLenum)) load_proc("glGetString");
 
     if (local_glGetString == NULL) {
         return AGLET_ERROR_PROC_LOAD;
