@@ -1,7 +1,7 @@
 # Aglet
 
-Aglet is the *A*rgus *G*raphics *L*ibrary *E*xtension *T*ool. It is capable of generating customized loader code for
-OpenGL functions for use with C/C++ programs.
+Aglet is the **A**rgus **G**raphics **L**ibrary **E**xtension **T**ool. It is capable of generating customized loader
+code for OpenGL functions for use with C/C++ programs.
 
 ## Setup
 
