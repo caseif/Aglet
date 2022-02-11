@@ -300,8 +300,8 @@ def load_profile_members(reg, profile)
         next unless ext_names.include? ext_name
 
         supported = ext.xpath('@supported').text
-        if supported != nil and not supported.split('|').include? profile.api
-            raise "Extension #{ext_name} is not supported by the selected API (#{profile.api})"
+        if supported != nil and not supported.split('|').include? profile.feature_api
+            raise "Extension #{ext_name} is not supported by the selected API (#{profile.feature_api})"
         end
 
         require_types += ext.xpath('.//require/type/@name').map { |n| n.text }.flatten
