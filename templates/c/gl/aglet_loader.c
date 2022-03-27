@@ -61,7 +61,7 @@ static int _load_versions(AgletLoadProc load_proc) {
         return AGLET_ERROR_GL_ERROR;
     }
     #endif
-    
+
     // fallback section
 
     const GLubyte *(*local_glGetString)(GLenum name) = (const GLubyte*(*)(GLenum)) load_proc("glGetString");
@@ -81,7 +81,7 @@ static int _load_versions(AgletLoadProc load_proc) {
         return AGLET_ERROR_UNSPECIFIED;
     }
     size_t major_len = (size_t) (dot_off_1 - ver_str);
-    
+
     char *dot_off_2 = NULL;
     for (size_t i = 2; i < strlen(dot_off_1) - 1; i++) {
         if (dot_off_1[i] == '.' || dot_off_1[i] == ' ') {
@@ -117,7 +117,7 @@ static int _load_versions(AgletLoadProc load_proc) {
 }
 
 static int _load_extensions(AgletLoadProc load_proc) {
-    GLenum(*local_glGetError)() = (const GLenum(*)()) load_proc("glGetError");
+    GLenum(*local_glGetError)() = (GLenum(*)()) load_proc("glGetError");
     if (local_glGetError == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
@@ -128,7 +128,7 @@ static int _load_extensions(AgletLoadProc load_proc) {
     if (local_glGetStringi != NULL && local_glGetIntegerv != NULL) {
         int num_exts = 0;
         local_glGetIntegerv(GL_NUM_EXTENSIONS, &num_exts);
-        
+
         int gl_err = local_glGetError();
         if (gl_err == GL_NO_ERROR) {
         for (int i = 0; i < num_exts; i++) {
@@ -169,7 +169,7 @@ static int _load_extensions(AgletLoadProc load_proc) {
     while (next_ext != NULL) {
         cur_ext = next_ext + 1;
         next_ext = strchr(cur_ext, ' ');
-        
+
         size_t cur_len = next_ext != NULL ? next_ext - cur_ext : strlen(cur_ext);
 
         if (cur_len == 0) {
@@ -182,6 +182,15 @@ static int _load_extensions(AgletLoadProc load_proc) {
             continue;
         }
         #= /foreach =#
+    }
+
+    return 0;
+}
+
+static int _check_minimum_version() {
+    if (!AGLET_@{min_api_version}) {
+        fprintf(stderr, "[Aglet] Current environment does not support minimum @{api_name} version\n");
+        return AGLET_ERROR_MINIMUM_VERSION;
     }
 
     return 0;
@@ -208,6 +217,37 @@ static int _check_required_extensions() {
     return 0;
 }
 
+int agletLoadCapabilities(AgletLoadProc load_proc) {
+    static bool _loaded_caps = false;
+
+    if (_loaded_caps) {
+        return 0;
+    }
+
+    int rc = 0;
+    if ((rc = _load_versions(load_proc)) != 0) {
+        fprintf(stderr, "[Aglet] Failed to query supported versions\\n");
+        return rc;
+    }
+
+    if ((rc = _check_minimum_version()) != 0) {
+        return rc;
+    }
+
+    if ((rc = _load_extensions(load_proc)) != 0) {
+        fprintf(stderr, "[Aglet] Failed to query extensions (rc %d)\\n", rc);
+        return rc;
+    }
+
+    if ((rc = _check_required_extensions()) != 0) {
+        return rc;
+    }
+
+    _loaded_caps = true;
+
+    return 0;
+}
+
 static int _load_procs(AgletLoadProc load_proc) {
     #= foreach procs =#
     aglet_@{name} = (PFN@{name_upper}PROC) load_proc("@{name}");
@@ -218,17 +258,7 @@ static int _load_procs(AgletLoadProc load_proc) {
 
 int agletLoad(AgletLoadProc load_proc) {
     int rc = 0;
-    if ((rc = _load_versions(load_proc)) != 0) {
-        fprintf(stderr, "[Aglet] Failed to query supported versions\\n");
-        return rc;
-    }
-
-    if ((rc = _load_extensions(load_proc)) != 0) {
-        fprintf(stderr, "[Aglet] Failed to query extensions (rc %d)\\n", rc);
-        return rc;
-    }
-
-    if ((rc = _check_required_extensions()) != 0) {
+    if ((rc = agletLoadCapabilities(load_proc)) != 0) {
         return rc;
     }
 

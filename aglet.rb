@@ -26,6 +26,13 @@ FEATURE_API_GLSC_2 = 'glsc2'
 
 API_FAMILY_GL = 'gl'
 
+API_FRIENDLY_GL = 'GL'
+API_FRIENDLY_GLES = 'GL ES'
+API_FRIENDLY_GLSC = 'GL SC'
+
+TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION = 'min_api_version'
+TEMPLATE_PLACE_GLOBAL_API_NAME = 'api_name'
+
 TEMPLATE_PLACE_VERSIONS = 'api_versions'
 TEMPLATE_PLACE_TYPE_DEFS = 'type_defs'
 TEMPLATE_PLACE_ENUM_DEFS = 'enum_defs'
@@ -102,12 +109,14 @@ class ApiEnum
 end
 
 class ApiDefs
-    def initialize(versions, types, enums, procs)
+    def initialize(min_version, versions, types, enums, procs)
+        @min_version = min_version
         @versions = versions
         @types = types
         @enums = enums
         @procs = procs
     end
+    attr_reader :min_version
     attr_reader :versions
     attr_reader :types
     attr_reader :enums
@@ -124,17 +133,19 @@ class ApiExtension
 end
 
 class ApiProfile
-    def initialize(api, feature_api, api_family, version, extensions)
+    def initialize(api, feature_api, api_family, min_version, target_version, extensions)
         @api = api
         @feature_api = feature_api
         @api_family = api_family
-        @version = version
+        @min_version = min_version
+        @target_version = target_version
         @extensions = extensions
     end
     attr_reader :api
     attr_reader :feature_api
     attr_reader :api_family
-    attr_reader :version
+    attr_reader :min_version
+    attr_reader :target_version
     attr_reader :extensions
 end
 
@@ -175,14 +186,14 @@ def gen_from_template(template_path, subs_data)
         sec_name = s.named_captures['name']
         sec_content = s.named_captures['content']
         sec_subs = subs_data[sec_name]
-        next if not sec_subs
+        next unless sec_subs.is_a? Array
 
         sec_output = ''
 
         sec_subs.each do |sub_group|
             cur_content = sec_content.dup
             sub_group.each do |sub_item|
-                cur_content.gsub! "@{#{sub_item[0]}}", sub_item[1]
+                cur_content.gsub! "@{#{sub_item[0]}}", sub_item[1].to_s
             end
 
             sec_output << "#{cur_content}\n"
@@ -192,6 +203,11 @@ def gen_from_template(template_path, subs_data)
     end
 
     final_content << template_content[last_off..]
+
+    subs_data.each do |sub_item|
+        next unless sub_item[1].is_a?(String)
+        final_content.gsub! "@{#{sub_item[0]}}", sub_item[1]
+    end
 
     return final_content
 end
@@ -219,10 +235,45 @@ def parse_args()
     options
 end
 
+def version_eq(l_major, l_minor, r_major, r_minor)
+    l_major == r_major and l_minor == r_minor
+end
+
+def version_lt(l_major, l_minor, r_major, r_minor)
+    l_major < r_major or (l_major == r_major and l_minor < r_minor)
+end
+
+def version_lte(l_major, l_minor, r_major, r_minor)
+    l_major < r_major or (l_major == r_major and l_minor <= r_minor)
+end
+
+def version_gt(l_major, l_minor, r_major, r_minor)
+    l_major > r_major or (l_major == r_major and l_minor > r_minor)
+end
+
+def version_gte(l_major, l_minor, r_major, r_minor)
+    l_major > r_major or (l_major == r_major and l_minor >= r_minor)
+end
+
+def api_to_friendly_name(api)
+    return API_FRIENDLY_GL if api == API_GL or api == API_GL_CORE
+    return API_FRIENDLY_GLES if api == API_GLES
+    return API_FRIENDLY_GLSC if api == API_GLSC
+end
+
 def load_profile(profile_path)
     profile = File.open(profile_path) { |f| Nokogiri::XML(f) }
     api = profile.xpath('//profile/api//name/text()').text
-    version = profile.xpath('//profile//api//version/text()').text
+    min_version = profile.xpath('//profile//api//minVersion/text()').text
+    target_version = profile.xpath('//profile//api//targetVersion/text()').text
+
+    raise "Minimum version is malformed for API '#{api}'" unless min_version.include? '.'
+
+    raise "Target version is malformed for API '#{api}'" unless target_version.include? '.'
+
+    min_major, min_minor = min_version.split('.').map(&:to_i)
+
+    target_major, target_minor = target_version.split('.').map(&:to_i)
 
     feature_api = ''
     api_family = ''
@@ -230,7 +281,7 @@ def load_profile(profile_path)
         feature_api = FEATURE_API_GL
         api_family = API_FAMILY_GL
     elsif api == API_GLES
-        if version.start_with? '1.'
+        if target_major == 1
             feature_api = FEATURE_API_GLES_1
         else
             feature_api = FEATURE_API_GLES_2
@@ -244,10 +295,22 @@ def load_profile(profile_path)
         return nil
     end
 
+    # some tricky rules to handle here
+
+    raise 'Minimum API version must be less than or equal to target version' if version_gt(min_major, min_minor, target_major, target_minor)
+
+    # GLES 1.x and 2.x/3.x are effectively considered different APIs by the
+    # spec, so it doesn't make sense to target both at once
+    raise 'Minimum GLES version must be >= 2.0 when version 2/3 is targeted' if api == API_GLES and target_major >= 2 and min_major < 2
+
+    raise 'Target GL version must be >= 3.2 when core profile is specified' if api == API_GL_CORE and version_lt(target_major, target_minor, 3, 2)
+
+    raise 'Minimum GL version must be >= 3.2 when core profile is specified' if api == API_GL_CORE and version_lt(min_major, min_minor, 3, 2)
+
     extensions = profile.xpath('//profile//extensions//extension')
         .map { |e| ApiExtension.new(e.text, e.at_xpath('./@required').to_s.downcase == 'true') }
 
-    return ApiProfile.new(api, feature_api, api_family, version, extensions)
+    return ApiProfile.new(api, feature_api, api_family, min_version, target_version, extensions)
 end
 
 def load_profile_members(reg, profile)
@@ -255,14 +318,15 @@ def load_profile_members(reg, profile)
     require_enums = []
     require_procs = []
 
-    req_major, req_minor = profile.version.split('.')
+    min_major, min_minor = profile.min_version.split('.').map(&:to_i)
+    target_major, target_minor = profile.min_version.split('.').map(&:to_i)
 
     seen_vers = 0
     gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile.feature_api)
     gl_feature_spec.each do |ver|
         feature_number = ver.xpath('@number').text
-        feature_major, feature_minor = feature_number.split('.')
-        next if feature_major > req_major or (feature_major == req_major and feature_minor > req_minor)
+        feature_major, feature_minor = feature_number.split('.').map(&:to_i)
+        next if version_gt(feature_major, feature_minor, target_major, target_minor)
 
         seen_vers += 1
 
@@ -312,7 +376,7 @@ def load_profile_members(reg, profile)
         require_procs -= ext.xpath('.//remove//command/@name').map { |n| n.text }.flatten
     end
 
-    print "Finished discovering members for profile \"#{profile.api} #{profile.version}\""
+    print "Finished discovering members for profile \"#{profile.api} #{profile.target_version}\""
     print " (#{require_types.length} types, #{require_enums.length} enums, #{require_procs.length} functions)\n"
 
     return ApiMembers.new(require_types.to_set, require_enums.to_set, require_procs.to_set)
@@ -323,6 +387,7 @@ def parse_param_type(raw)
 end
 
 def load_gl_defs(reg, profile, members)
+    min_version = nil
     versions = []
     types = []
     enums = []
@@ -332,7 +397,7 @@ def load_gl_defs(reg, profile, members)
     gl_feature_spec.each do |ver|
         feature_number = ver.xpath('@number').text
         feature_name = ver.xpath('@name').text
-        feature_major, feature_minor = feature_number.split('.')
+        feature_major, feature_minor = feature_number.split('.').map(&:to_i)
         versions << ApiVersion.new(profile.feature_api, feature_name, feature_major, feature_minor)
     end
 
@@ -403,13 +468,21 @@ def load_gl_defs(reg, profile, members)
         enums << ApiEnum.new(enum_name, enum_group, enum_value)
     end
 
-    ApiDefs.new(versions, types, enums, procs)
+    min_major, min_minor = profile.min_version.split('.').map(&:to_i)
+    min_version = versions.find { |v| version_eq(v.major, v.minor, min_major, min_minor) }
+
+    raise "Minimum API version #{profile.min_version} not found in registry" if min_version.nil?
+
+    ApiDefs.new(min_version, versions, types, enums, procs)
 end
 
 def generate_header(out_dir, profile, defs)
     out_file = File.open("#{out_dir}/aglet.h", 'w')
 
     subs_data = {}
+
+    subs_data[TEMPLATE_PLACE_GLOBAL_API_NAME] = api_to_friendly_name profile.api
+    subs_data[TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION] = defs.min_version.name
 
     subs_data[TEMPLATE_PLACE_VERSIONS] = []
     defs.versions.each do |v|
@@ -452,6 +525,9 @@ def generate_loader_source(out_dir, profile, defs)
     out_file = File.open("#{out_dir}/aglet_loader.c", 'w')
 
     subs_data = {}
+
+    subs_data[TEMPLATE_PLACE_GLOBAL_API_NAME] = api_to_friendly_name profile.api
+    subs_data[TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION] = defs.min_version.name
 
     subs_data[TEMPLATE_PLACE_VERSIONS] = []
     defs.versions.each do |v|

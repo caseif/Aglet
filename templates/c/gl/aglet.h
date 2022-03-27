@@ -16,6 +16,7 @@ extern "C" {
 
 #define GLFW_INCLUDE_NONE
 
+#define AGLET_ERROR_NONE 0
 #define AGLET_ERROR_UNSPECIFIED 1
 #define AGLET_ERROR_PROC_LOAD 2
 #define AGLET_ERROR_GL_ERROR 3
@@ -69,6 +70,8 @@ typedef @{ret_type} (APIENTRYP PFN@{name_upper}PROC)(@{params});
 GLAPI PFN@{name_upper}PROC aglet_@{name};
 #define @{name} aglet_@{name}
 #= /foreach =#
+
+int agletLoadCapabilities(AgletLoadProc load_proc_fn);
 
 int agletLoad(AgletLoadProc load_proc_fn);
 
