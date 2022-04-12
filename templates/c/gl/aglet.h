@@ -14,8 +14,6 @@ extern "C" {
 #error "glext.h must not be included alongside aglet.h"
 #endif
 
-#define GLFW_INCLUDE_NONE
-
 #define AGLET_ERROR_NONE 0
 #define AGLET_ERROR_UNSPECIFIED 1
 #define AGLET_ERROR_PROC_LOAD 2
