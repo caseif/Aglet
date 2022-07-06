@@ -170,7 +170,7 @@ static int _load_extensions(AgletLoadProc load_proc) {
         cur_ext = next_ext + 1;
         next_ext = strchr(cur_ext, ' ');
 
-        size_t cur_len = next_ext != NULL ? next_ext - cur_ext : strlen(cur_ext);
+        size_t cur_len = next_ext != NULL ? (size_t) (next_ext - cur_ext) : strlen(cur_ext);
 
         if (cur_len == 0) {
             continue;
