@@ -319,7 +319,7 @@ def load_profile_members(reg, profile)
     require_procs = []
 
     min_major, min_minor = profile.min_version.split('.').map(&:to_i)
-    target_major, target_minor = profile.min_version.split('.').map(&:to_i)
+    target_major, target_minor = profile.target_version.split('.').map(&:to_i)
 
     seen_vers = 0
     gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile.feature_api)
