@@ -37,8 +37,8 @@ static int _load_versions(AgletLoadProc load_proc) {
         return AGLET_ERROR_PROC_LOAD;
     }
 
-    int glErr = local_glGetError();
-    if (glErr == GL_NO_ERROR) {
+    GLenum gl_err = local_glGetError();
+    if (gl_err == GL_NO_ERROR) {
         int ver_major;
         int ver_minor;
 
@@ -57,7 +57,7 @@ static int _load_versions(AgletLoadProc load_proc) {
         #= /foreach =#
 
         return 0;
-    } else if (glErr != GL_INVALID_ENUM) {
+    } else if (gl_err != GL_INVALID_ENUM) {
         return AGLET_ERROR_GL_ERROR;
     }
     #endif
@@ -129,9 +129,14 @@ static int _load_extensions(AgletLoadProc load_proc) {
         int num_exts = 0;
         local_glGetIntegerv(GL_NUM_EXTENSIONS, &num_exts);
 
-        int gl_err = local_glGetError();
+        if (num_exts < 0) {
+            // this should never happen, something has gone catastrophically wrong
+            return AGLET_ERROR_UNSPECIFIED;
+        }
+
+        GLenum gl_err = local_glGetError();
         if (gl_err == GL_NO_ERROR) {
-        for (int i = 0; i < num_exts; i++) {
+        for (unsigned int i = 0; i < (unsigned int) num_exts; i++) {
             const char *cur_ext = (const char *) local_glGetStringi(GL_EXTENSIONS, i);
             const size_t cur_len = strlen(cur_ext);
 
@@ -159,9 +164,9 @@ static int _load_extensions(AgletLoadProc load_proc) {
     }
 
     const char *exts_str = (const char *) local_glGetString(GL_EXTENSIONS);
-    int glErr = local_glGetError();
-    if (glErr != GL_NO_ERROR) {
-        return glErr;
+    GLenum gl_err = local_glGetError();
+    if (gl_err != GL_NO_ERROR) {
+        return AGLET_ERROR_GL_ERROR;
     }
 
     const char *cur_ext = NULL;
