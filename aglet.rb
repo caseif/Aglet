@@ -213,7 +213,11 @@ def gen_from_template(template_path, subs_data)
 end
 
 def params_to_str(params)
-    params.join(', ')
+    if params.empty?
+        return 'void'
+    else
+        return params.map { |p| p.gen_c }.join(', ')
+    end
 end
 
 def parse_args()
@@ -504,7 +508,7 @@ def generate_header(out_dir, profile, defs)
     subs_data[TEMPLATE_PLACE_PROC_DEFS] = []
     defs.procs.each do |p|
         subs_data[TEMPLATE_PLACE_PROC_DEFS] << {name: p.name, name_upper: p.name.upcase, ret_type: p.ret_type,
-            params: p.params.map { |p| p.gen_c }.join(', ')}
+            params: params_to_str(p.params) }
     end
 
     subs_data[TEMPLATE_PLACE_EXTENSION_DEFS] = []

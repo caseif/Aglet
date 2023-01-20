@@ -25,7 +25,7 @@ PFN@{name_upper}PROC aglet_@{name} = NULL;
 #= /foreach =#
 
 static int _load_versions(AgletLoadProc load_proc) {
-    GLenum(*local_glGetError)() = (GLenum(*)()) load_proc("glGetError");
+    GLenum(*local_glGetError)(void) = (GLenum(*)(void)) load_proc("glGetError");
     if (local_glGetError == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
@@ -117,7 +117,7 @@ static int _load_versions(AgletLoadProc load_proc) {
 }
 
 static int _load_extensions(AgletLoadProc load_proc) {
-    GLenum(*local_glGetError)() = (GLenum(*)()) load_proc("glGetError");
+    GLenum(*local_glGetError)(void) = (GLenum(*)(void)) load_proc("glGetError");
     if (local_glGetError == NULL) {
         return AGLET_ERROR_PROC_LOAD;
     }
@@ -192,7 +192,7 @@ static int _load_extensions(AgletLoadProc load_proc) {
     return 0;
 }
 
-static int _check_minimum_version() {
+static int _check_minimum_version(void) {
     if (!AGLET_@{min_api_version}) {
         fprintf(stderr, "[Aglet] Current environment does not support minimum @{api_name} version\n");
         return AGLET_ERROR_MINIMUM_VERSION;
@@ -201,7 +201,7 @@ static int _check_minimum_version() {
     return 0;
 }
 
-static int _check_required_extensions() {
+static int _check_required_extensions(void) {
     bool missing_ext = false;
 
     #= foreach extensions =#
