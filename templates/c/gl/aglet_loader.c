@@ -206,7 +206,8 @@ static int _check_required_extensions(void) {
 
     #= foreach extensions =#
     if (!AGLET_@{name}) {
-        if (@{required}) {
+        bool is_ext_required = @{required};
+        if (is_ext_required) {
             fprintf(stderr, "[Aglet] Required extension @{name} is not available\n");
             missing_ext = true;
         } else {
