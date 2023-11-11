@@ -232,7 +232,7 @@ int agletLoadCapabilities(AgletLoadProc load_proc) {
 
     int rc = 0;
     if ((rc = _load_versions(load_proc)) != 0) {
-        fprintf(stderr, "[Aglet] Failed to query supported versions\\n");
+        fprintf(stderr, "[Aglet] Failed to query supported versions\n");
         return rc;
     }
 
@@ -241,7 +241,7 @@ int agletLoadCapabilities(AgletLoadProc load_proc) {
     }
 
     if ((rc = _load_extensions(load_proc)) != 0) {
-        fprintf(stderr, "[Aglet] Failed to query extensions (rc %d)\\n", rc);
+        fprintf(stderr, "[Aglet] Failed to query extensions (rc %d)\n", rc);
         return rc;
     }
 
