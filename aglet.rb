@@ -14,6 +14,9 @@ def indent(str, cols)
     "#{indent_space}#{str.gsub(/\n(.)/, "\n#{indent_space}\\1")}"
 end
 
+LANGUAGE_C = 'c'
+LANGUAGE_RUST = 'rust'
+
 API_GL = 'gl'
 API_GL_CORE = 'glcore'
 API_GLES = 'gles'
@@ -30,8 +33,13 @@ API_FRIENDLY_GL = 'GL'
 API_FRIENDLY_GLES = 'GL ES'
 API_FRIENDLY_GLSC = 'GL SC'
 
-TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION = 'min_api_version'
 TEMPLATE_PLACE_GLOBAL_API_NAME = 'api_name'
+TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION = 'min_api_version'
+TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION_MAJOR = 'min_api_version_major'
+TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION_MINOR = 'min_api_version_minor'
+TEMPLATE_PLACE_GLOBAL_TARGET_API_VERSION = 'target_api_version'
+TEMPLATE_PLACE_GLOBAL_TARGET_API_VERSION_MAJOR = 'target_api_version_major'
+TEMPLATE_PLACE_GLOBAL_TARGET_API_VERSION_MINOR = 'target_api_version_minor'
 
 TEMPLATE_PLACE_VERSIONS = 'api_versions'
 TEMPLATE_PLACE_TYPE_DEFS = 'type_defs'
@@ -51,6 +59,13 @@ C_GL_TEMPLATES_PATH = "#{C_TEMPLATES_PATH}/gl"
 C_GL_HEADER_TEMPLATE_PATH = "#{C_GL_TEMPLATES_PATH}/aglet.h"
 C_GL_LOADER_TEMPLATE_PATH = "#{C_GL_TEMPLATES_PATH}/aglet_loader.c"
 
+RUST_TEMPLATES_PATH = "#{__dir__}/templates/rust"
+RUST_GL_TEMPLATES_PATH = "#{RUST_TEMPLATES_PATH}/gl"
+RUST_GL_LOADER_TEMPLATE_PATH = "#{RUST_GL_TEMPLATES_PATH}/aglet.rs"
+
+HEADER_FILE_NAMES = { LANGUAGE_C => 'aglet.h' }
+SOURCE_FILE_NAMES = { LANGUAGE_C => 'aglet_loader.c', LANGUAGE_RUST => 'aglet.rs' }
+
 class ProcParam
     def initialize(name, type)
         @name = name
@@ -61,6 +76,34 @@ class ProcParam
 
     def gen_c()
         return "#{@type} #{@name}"
+    end
+
+    def gen_rust()
+        if @name == 'type'
+            rust_name = 'ty'
+        elsif @name == 'ref'
+            rust_name = 'reference'
+        else
+            rust_name = @name
+        end
+
+        rust_type = transform_c_type_for_rust(@type)
+
+        return "#{rust_name}: #{rust_type}"
+    end
+
+    def gen_names_c()
+        return "#{@name}"
+    end
+
+    def gen_names_rust()
+        if @name == 'type'
+            return 'ty'
+        elsif @name == 'ref'
+            return 'reference'
+        else
+            return @name
+        end
     end
 end
 
@@ -98,14 +141,16 @@ class ApiType
 end
 
 class ApiEnum
-    def initialize(name, group, value)
+    def initialize(name, group, value, width)
         @name = name
         @group = group
         @value = value
+        @width = width
     end
     attr_reader :name
     attr_reader :group
     attr_reader :value
+    attr_reader :width
 end
 
 class ApiDefs
@@ -169,23 +214,90 @@ class TemplateSubs
     attr_reader :subs
 end
 
-def gen_from_template(template_path, subs_data)
+def transform_c_type_for_rust(c_type)
+    if c_type == 'void'
+        return '()'
+    end
+
+    if c_type.count('*') == 0
+        return c_type.strip()
+    end
+
+    bare_type = c_type.gsub(/\bconst\b|\*/, '').strip()
+    if bare_type == 'void'
+        bare_type = 'std::ffi::c_void'
+    end
+
+    if c_type.count('*') == 1
+        if c_type.start_with?('const ')
+            rust_type = "*const #{bare_type}"
+        else
+            rust_type = "*mut #{bare_type}"
+        end
+    elsif c_type.count('*') == 2
+        if c_type.start_with?('const ')
+            inner_ptr_type = '*const'
+        else
+            inner_ptr_type = '*mut'
+        end
+
+        inner_segment = c_type.gsub(/ *\* *$/, '')
+        if inner_segment.end_with?('const')
+            outer_ptr_type = '*const'
+        else
+            outer_ptr_type = '*mut'
+        end
+
+        rust_type = "#{outer_ptr_type} #{inner_ptr_type} #{bare_type}"
+    end
+end
+
+def gen_from_template(template_path, subst_map)
     template_content = File.read template_path
-    final_content = ''
+    interim_content = ''
 
     last_off = 0
 
-    sec_templates = template_content.to_enum(:scan, /(?<start>[ \t]*#)\= foreach (?<name>.*?) \=#\n(?<content>.*?)\n[ \t]*#\= \/foreach \=#(?<end>\n)/m).map { Regexp.last_match }
-    sec_templates.each do |s|
+    sec_if_templates = template_content.to_enum(:scan, /(?<start>[ \t]*#)\= if (?<expr>.*?) \=#\n(?<content>.*?)\n[ \t]*#\= \/if \=#(?<end>\n)/m).map { Regexp.last_match }
+    sec_if_templates.each do |s|
         sec_start = s.offset(:start)[0] - 1
         sec_end = s.end(:end)
 
-        final_content << template_content[last_off..sec_start]
+        interim_content << template_content[last_off..sec_start]
+        last_off = sec_end
+
+        sec_expr = s.named_captures['expr']
+
+        subst_expr = sec_expr.dup
+        subst_map.each do |sub_item|
+            next unless sub_item[1].is_a?(String) or sub_item[1].is_a?(Numeric)
+
+            subst_expr.gsub! "@{#{sub_item[0]}}", sub_item[1].to_s
+        end
+
+        expr_res = eval(subst_expr)
+        next unless expr_res
+
+        interim_content << s.named_captures['content']
+    end
+
+    interim_content << template_content[last_off..]
+
+    template_content = interim_content.dup
+    interim_content = ''
+    last_off = 0
+
+    sec_foreach_templates = template_content.to_enum(:scan, /(?<start>[ \t]*#)\= foreach (?<name>.*?) \=#\n(?<content>.*?)\n[ \t]*#\= \/foreach \=#(?<end>\n)/m).map { Regexp.last_match }
+    sec_foreach_templates.each do |s|
+        sec_start = s.offset(:start)[0] - 1
+        sec_end = s.end(:end)
+
+        interim_content << template_content[last_off..sec_start]
         last_off = sec_end
 
         sec_name = s.named_captures['name']
         sec_content = s.named_captures['content']
-        sec_subs = subs_data[sec_name]
+        sec_subs = subst_map[sec_name]
         next unless sec_subs.is_a? Array
 
         sec_output = ''
@@ -199,32 +311,66 @@ def gen_from_template(template_path, subs_data)
             sec_output << "#{cur_content}\n"
         end
 
-        final_content << sec_output
+        interim_content << sec_output
     end
 
-    final_content << template_content[last_off..]
+    interim_content << template_content[last_off..]
 
-    subs_data.each do |sub_item|
-        next unless sub_item[1].is_a?(String)
-        final_content.gsub! "@{#{sub_item[0]}}", sub_item[1]
+    final_content = interim_content
+
+    subst_map.each do |sub_item|
+        next unless sub_item[1].is_a?(String) or sub_item[1].is_a?(Numeric)
+        final_content.gsub! "@{#{sub_item[0]}}", sub_item[1].to_s
     end
 
     return final_content
 end
 
-def params_to_str(params)
-    if params.empty?
-        return 'void'
+def params_to_str(lang, params)
+    if lang == 'c'
+        if params.empty?
+            return 'void'
+        else
+            return params.map { |p| p.gen_c }.join(', ')
+        end
+    elsif lang == 'rust'
+        if params.empty?
+            return ''
+        else
+            return params.map { |p| p.gen_rust }.join(', ')
+        end
     else
-        return params.map { |p| p.gen_c }.join(', ')
+        raise "Invalid output language '#{lang}'"
     end
 end
+
+def param_names_to_str(lang, params)
+    if lang == 'c'
+        if params.empty?
+            return 'void'
+        else
+            return params.map { |p| p.gen_names_c }.join(', ')
+        end
+    elsif lang == 'rust'
+        if params.empty?
+            return ''
+        else
+            return params.map { |p| p.gen_names_rust }.join(', ')
+        end
+    else
+        raise "Invalid output language '#{lang}'"
+    end
+end
+
 
 def parse_args()
     options = {}
     OptionParser.new do |opts|
-        opts.banner = "Usage: aglet.rb -p <profile> -h <output dir>"
+        opts.banner = "Usage: aglet.rb -l <language> -p <profile> -o <output dir>"
 
+        opts.on('-l LANGUAGE', '--lang=LANGUAGE', 'Language to emit bindings for') do |l|
+            options[:language] = l.downcase()
+        end
         opts.on('-p PROFILE', '--profile=PROFILE', 'Path to profile file') do |p|
             options[:profile] = p
         end
@@ -233,6 +379,7 @@ def parse_args()
         end
     end.parse!
 
+    raise "Output language is required" unless options[:language]
     raise "Profile path is required" unless options[:profile]
     raise "Output path is required" unless options[:output]
 
@@ -466,10 +613,17 @@ def load_gl_defs(reg, profile, members)
         enum_name = enum_root.xpath('./@name').text
         enum_group = enum_root.xpath('./@group').text
         enum_value = enum_root.xpath('./@value').text
+        enum_type = enum_root.xpath('./@type').text
         next if enum_api = enum_root.at_xpath('./@api') and enum_api != profile.feature_api
         next unless members.enum_names.include? enum_name
 
-        enums << ApiEnum.new(enum_name, enum_group, enum_value)
+        if enum_type == 'ull'
+            enum_width = 64
+        else
+            enum_width = 32
+        end
+
+        enums << ApiEnum.new(enum_name, enum_group, enum_value, enum_width)
     end
 
     min_major, min_minor = profile.min_version.split('.').map(&:to_i)
@@ -480,78 +634,101 @@ def load_gl_defs(reg, profile, members)
     ApiDefs.new(min_version, versions, types, enums, procs)
 end
 
-def generate_header(out_dir, profile, defs)
-    out_file = File.open("#{out_dir}/aglet.h", 'w')
+def gen_subst_map(lang, profile, defs)
+    subst_map = {}
 
-    subs_data = {}
+    min_major, min_minor = profile.min_version.split('.').map(&:to_i)
+    target_major, target_minor = profile.target_version.split('.').map(&:to_i)
 
-    subs_data[TEMPLATE_PLACE_GLOBAL_API_NAME] = api_to_friendly_name profile.api
-    subs_data[TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION] = defs.min_version.name
+    subst_map[TEMPLATE_PLACE_GLOBAL_API_NAME] = api_to_friendly_name profile.api
+    subst_map[TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION] = defs.min_version.name
+    subst_map[TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION_MAJOR] = min_major
+    subst_map[TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION_MINOR] = min_minor
+    subst_map[TEMPLATE_PLACE_GLOBAL_TARGET_API_VERSION] = profile.target_version
+    subst_map[TEMPLATE_PLACE_GLOBAL_TARGET_API_VERSION_MAJOR] = target_major
+    subst_map[TEMPLATE_PLACE_GLOBAL_TARGET_API_VERSION_MINOR] = target_minor
 
-    subs_data[TEMPLATE_PLACE_VERSIONS] = []
+    subst_map[TEMPLATE_PLACE_VERSIONS] = []
     defs.versions.each do |v|
-        subs_data[TEMPLATE_PLACE_VERSIONS] << {name: v.name.upcase, major: v.major, minor: v.minor}
+        subst_map[TEMPLATE_PLACE_VERSIONS] << {name: v.name, major: v.major, minor: v.minor}
     end
 
-    subs_data[TEMPLATE_PLACE_TYPE_DEFS] = []
+    subst_map[TEMPLATE_PLACE_EXTENSION_DEFS] = []
+    profile.extensions.each do |e|
+        subst_map[TEMPLATE_PLACE_EXTENSION_DEFS] << {name: e.name, required: e.required.to_s}
+    end
+
+    subst_map[TEMPLATE_PLACE_TYPE_DEFS] = []
     defs.types.each do |t|
-        subs_data[TEMPLATE_PLACE_TYPE_DEFS] << {name: t.name, typedef: t.typedef}
+        subst_map[TEMPLATE_PLACE_TYPE_DEFS] << {name: t.name, typedef: t.typedef}
     end
 
-    subs_data[TEMPLATE_PLACE_ENUM_DEFS] = []
+    subst_map[TEMPLATE_PLACE_ENUM_DEFS] = []
     defs.enums.group_by { |e| e.group }.each do |name, group|
         group.each do |e|
-            subs_data[TEMPLATE_PLACE_ENUM_DEFS] << {name: e.name, value: e.value}
+            subst_map[TEMPLATE_PLACE_ENUM_DEFS] << {name: e.name, value: e.value, width: e.width}
         end
     end
 
-    subs_data[TEMPLATE_PLACE_PROC_DEFS] = []
+    subst_map[TEMPLATE_PLACE_PROC_DEFS] = []
     defs.procs.each do |p|
-        subs_data[TEMPLATE_PLACE_PROC_DEFS] << {name: p.name, name_upper: p.name.upcase, ret_type: p.ret_type,
-            params: params_to_str(p.params) }
+        if lang == 'rust'
+            ret_type = transform_c_type_for_rust(p.ret_type)
+        else
+            ret_type = p.ret_type
+        end
+
+        subst_map[TEMPLATE_PLACE_PROC_DEFS] << {name: p.name, name_upper: p.name.upcase, ret_type: ret_type,
+            params: params_to_str(lang, p.params), param_names: param_names_to_str(lang, p.params) }
     end
 
-    subs_data[TEMPLATE_PLACE_EXTENSION_DEFS] = []
+    subst_map[TEMPLATE_PLACE_EXTENSIONS] = []
     profile.extensions.each do |e|
-        subs_data[TEMPLATE_PLACE_EXTENSION_DEFS] << {name: e.name, required: e.required.to_s}
+        subst_map[TEMPLATE_PLACE_EXTENSIONS] << {name: e.name, required: e.required.to_s}
     end
 
-    #TODO: consider API and generator language
-    header_template_path = C_GL_HEADER_TEMPLATE_PATH
+    subst_map[TEMPLATE_PLACE_PROCS] = []
+    defs.procs.each do |p|
+        subst_map[TEMPLATE_PLACE_PROCS] << {name: p.name, name_upper: p.name.upcase}
+    end
 
-    out_file << gen_from_template(header_template_path, subs_data)
+    return subst_map
+end
+
+def generate_header(lang, out_dir, profile, defs)
+    # rust doesn't separate declarations from definitions
+    return if lang == LANGUAGE_RUST
+
+    out_file = File.open("#{out_dir}/#{HEADER_FILE_NAMES[lang]}", 'w')
+
+    subst_map = gen_subst_map(lang, profile, defs)
+
+    if lang == LANGUAGE_C
+        header_template_path = C_GL_HEADER_TEMPLATE_PATH
+    else
+        raise "Invalid output language '#{lang}'"
+    end
+
+    out_file << gen_from_template(header_template_path, subst_map)
     return
 end
 
-def generate_loader_source(out_dir, profile, defs)
+def generate_loader_source(lang, out_dir, profile, defs)
     procs = defs.procs
 
-    out_file = File.open("#{out_dir}/aglet_loader.c", 'w')
+    out_file = File.open("#{out_dir}/#{SOURCE_FILE_NAMES[lang]}", 'w')
 
-    subs_data = {}
+    subst_map = gen_subst_map(lang, profile, defs)
 
-    subs_data[TEMPLATE_PLACE_GLOBAL_API_NAME] = api_to_friendly_name profile.api
-    subs_data[TEMPLATE_PLACE_GLOBAL_MIN_API_VERSION] = defs.min_version.name
-
-    subs_data[TEMPLATE_PLACE_VERSIONS] = []
-    defs.versions.each do |v|
-        subs_data[TEMPLATE_PLACE_VERSIONS] << {name: v.name, major: v.major, minor: v.minor}
+    if lang == LANGUAGE_C
+        loader_template_path = C_GL_LOADER_TEMPLATE_PATH
+    elsif lang == LANGUAGE_RUST
+        loader_template_path = RUST_GL_LOADER_TEMPLATE_PATH
+    else
+        raise "Invalid output language '#{lang}'"
     end
 
-    subs_data[TEMPLATE_PLACE_EXTENSIONS] = []
-    profile.extensions.each do |e|
-        subs_data[TEMPLATE_PLACE_EXTENSIONS] << {name: e.name, required: e.required.to_s}
-    end
-
-    subs_data[TEMPLATE_PLACE_PROCS] = []
-    defs.procs.each do |p|
-        subs_data[TEMPLATE_PLACE_PROCS] << {name: p.name, name_upper: p.name.upcase}
-    end
-
-    #TODO: consider API and generator language
-    loader_template_path = C_GL_LOADER_TEMPLATE_PATH
-
-    out_file << gen_from_template(loader_template_path, subs_data)
+    out_file << gen_from_template(loader_template_path, subst_map)
 end
 
 args = parse_args
@@ -572,6 +749,8 @@ end
 
 defs = load_gl_defs(reg, profile, profile_members)
 
+lang = args[:language]
+
 out_path = args[:output]
 base_header_out_path = "#{out_path}/include"
 aglet_header_out_path = "#{base_header_out_path}/aglet"
@@ -580,8 +759,8 @@ source_out_path = "#{out_path}/src"
 FileUtils.mkdir_p aglet_header_out_path
 FileUtils.mkdir_p source_out_path
 
-generate_header(aglet_header_out_path, profile, defs)
-generate_loader_source(source_out_path, profile, defs)
+generate_header(lang, aglet_header_out_path, profile, defs)
+generate_loader_source(lang, source_out_path, profile, defs)
 
 khr_header_out_path = "#{base_header_out_path}/KHR"
 FileUtils.mkdir_p khr_header_out_path
