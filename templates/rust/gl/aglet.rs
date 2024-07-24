@@ -97,27 +97,27 @@ type AgletLoadProc = unsafe extern "C" fn(name: *const std::ffi::c_char) -> *mut
 static mut DID_LOAD_CAPS: bool = false;
 
 #= foreach api_versions =#
-static mut AGLET_@{name}: bool = false;
+pub static mut AGLET_@{name}: bool = false;
 #= /foreach =#
 
 #= foreach extensions =#
 #[allow(non_upper_case_globals, unused_variables)]
-static mut AGLET_@{name}: bool = false;
+pub static mut AGLET_@{name}: bool = false;
 #= /foreach =#
 
 #= foreach enum_defs =#
 #[allow(dead_code, non_upper_case_globals)]
-const @{name}: u@{width} = @{value};
+pub const @{name}: u@{width} = @{value};
 #= /foreach =#
 
 #= foreach proc_defs =#
 #[allow(non_camel_case_types)]
-type PFN@{name_upper}PROC = unsafe extern "C" fn(@{params}) -> @{ret_type};
+pub type PFN@{name_upper}PROC = unsafe extern "C" fn(@{params}) -> @{ret_type};
 #= /foreach =#
 
 #= foreach procs =#
 #[allow(non_upper_case_globals)]
-static mut aglet_@{name}: Option<PFN@{name_upper}PROC> = None;
+pub static mut aglet_@{name}: Option<PFN@{name_upper}PROC> = None;
 #= /foreach =#
 
 #= foreach proc_defs =#
@@ -330,7 +330,17 @@ unsafe fn check_required_extensions() -> Result<(), AgletError> {
 }
 
 #[allow(dead_code, non_snake_case)]
-fn agletLoadCapabilities(load_proc: AgletLoadProc) -> Result<(), AgletError> {
+unsafe fn load_procs(load_proc: AgletLoadProc) -> Result<(), AgletError> {
+    #= foreach procs =#
+    let pn_@{name} = std::ffi::CString::new("@{name}").unwrap();
+    aglet_@{name} = Some(std::mem::transmute(load_proc(pn_@{name}.as_ptr())));
+    #= /foreach =#
+
+    return Ok(());
+}
+
+#[allow(dead_code, non_snake_case)]
+pub(crate) fn agletLoadCapabilities(load_proc: AgletLoadProc) -> Result<(), AgletError> {
     unsafe {
         if DID_LOAD_CAPS {
             return Ok(());
@@ -361,17 +371,7 @@ fn agletLoadCapabilities(load_proc: AgletLoadProc) -> Result<(), AgletError> {
 }
 
 #[allow(dead_code, non_snake_case)]
-unsafe fn load_procs(load_proc: AgletLoadProc) -> Result<(), AgletError> {
-    #= foreach procs =#
-    let pn_@{name} = std::ffi::CString::new("@{name}").unwrap();
-    aglet_@{name} = Some(std::mem::transmute(load_proc(pn_@{name}.as_ptr())));
-    #= /foreach =#
-
-    return Ok(());
-}
-
-#[allow(dead_code, non_snake_case)]
-fn agletLoad(load_proc: AgletLoadProc) -> Result<(), AgletError> {
+pub(crate) fn agletLoad(load_proc: AgletLoadProc) -> Result<(), AgletError> {
     unsafe {
         if let Err(e) = agletLoadCapabilities(load_proc) {
             return Err(e);
