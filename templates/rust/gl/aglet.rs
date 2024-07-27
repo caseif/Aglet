@@ -97,12 +97,12 @@ type AgletLoadProc = unsafe extern "C" fn(name: *const std::ffi::c_char) -> *mut
 static mut DID_LOAD_CAPS: bool = false;
 
 #= foreach api_versions =#
-pub static mut AGLET_@{name}: bool = false;
+static mut AGLET_@{name}: bool = false;
 #= /foreach =#
 
 #= foreach extensions =#
 #[allow(non_upper_case_globals, unused_variables)]
-pub static mut AGLET_@{name}: bool = false;
+static mut AGLET_@{name}: bool = false;
 #= /foreach =#
 
 #= foreach enum_defs =#
@@ -120,10 +120,18 @@ pub type PFN@{name_upper}PROC = unsafe extern "C" fn(@{params}) -> @{ret_type};
 pub static mut aglet_@{name}: Option<PFN@{name_upper}PROC> = None;
 #= /foreach =#
 
+#= foreach api_versions =#
+pub fn aglet_have_@{name_lower}() -> bool { unsafe { AGLET_@{name} } }
+#= /foreach =#
+
+#= foreach extensions =#
+pub fn aglet_have_@{name_lower}() -> bool { unsafe { AGLET_@{name} } }
+#= /foreach =#
+
 #= foreach proc_defs =#
 #[allow(dead_code, non_snake_case)]
 #[inline(always)]
-pub unsafe extern "C" fn @{name}(@{params}) -> @{ret_type} { (aglet_@{name}.unwrap())(@{param_names}) }
+pub fn @{name}(@{params}) -> @{ret_type} { unsafe { (aglet_@{name}.unwrap())(@{param_names}) } }
 #= /foreach =#
 
 #[allow(dead_code, non_snake_case)]

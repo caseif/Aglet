@@ -650,12 +650,14 @@ def gen_subst_map(lang, profile, defs)
 
     subst_map[TEMPLATE_PLACE_VERSIONS] = []
     defs.versions.each do |v|
-        subst_map[TEMPLATE_PLACE_VERSIONS] << {name: v.name, major: v.major, minor: v.minor}
+        subst_map[TEMPLATE_PLACE_VERSIONS] << {name: v.name, name_lower: v.name.downcase(),
+            major: v.major, minor: v.minor}
     end
 
     subst_map[TEMPLATE_PLACE_EXTENSION_DEFS] = []
     profile.extensions.each do |e|
-        subst_map[TEMPLATE_PLACE_EXTENSION_DEFS] << {name: e.name, required: e.required.to_s}
+        subst_map[TEMPLATE_PLACE_EXTENSION_DEFS] << {name: e.name, name_lower: e.name.downcase(),
+            required: e.required.to_s}
     end
 
     subst_map[TEMPLATE_PLACE_TYPE_DEFS] = []
@@ -684,7 +686,8 @@ def gen_subst_map(lang, profile, defs)
 
     subst_map[TEMPLATE_PLACE_EXTENSIONS] = []
     profile.extensions.each do |e|
-        subst_map[TEMPLATE_PLACE_EXTENSIONS] << {name: e.name, required: e.required.to_s}
+        subst_map[TEMPLATE_PLACE_EXTENSIONS] << {name: e.name, name_lower: e.name.downcase(),
+            required: e.required.to_s}
     end
 
     subst_map[TEMPLATE_PLACE_PROCS] = []
