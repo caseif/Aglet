@@ -121,10 +121,14 @@ pub static mut aglet_@{name}: Option<PFN@{name_upper}PROC> = None;
 #= /foreach =#
 
 #= foreach api_versions =#
+#[allow(dead_code, non_snake_case)]
+#[inline(always)]
 pub fn aglet_have_@{name_lower}() -> bool { unsafe { AGLET_@{name} } }
 #= /foreach =#
 
 #= foreach extensions =#
+#[allow(dead_code, non_snake_case)]
+#[inline(always)]
 pub fn aglet_have_@{name_lower}() -> bool { unsafe { AGLET_@{name} } }
 #= /foreach =#
 
