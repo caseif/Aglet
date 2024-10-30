@@ -1,3 +1,5 @@
 .bundle/
+.idea/
+out/
 vendor/
 Gemfile.lock
