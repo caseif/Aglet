@@ -414,9 +414,9 @@ end
 
 def load_profile(profile_path)
     profile = File.open(profile_path) { |f| Nokogiri::XML(f) }
-    api = profile.xpath('//profile/api//name/text()').text
-    min_version = profile.xpath('//profile//api//minVersion/text()').text
-    target_version = profile.xpath('//profile//api//targetVersion/text()').text
+    api = profile.xpath('/profile/api/name/text()').text
+    min_version = profile.xpath('/profile/api/minVersion/text()').text
+    target_version = profile.xpath('/profile/api/targetVersion/text()').text
 
     raise "Minimum version is malformed for API '#{api}'" unless min_version.include? '.'
 
@@ -458,7 +458,7 @@ def load_profile(profile_path)
 
     raise 'Minimum GL version must be >= 3.2 when core profile is specified' if api == API_GL_CORE and version_lt(min_major, min_minor, 3, 2)
 
-    extensions = profile.xpath('//profile//extensions//extension')
+    extensions = profile.xpath('/profile/extensions/extension')
         .map { |e| ApiExtension.new(e.text, e.at_xpath('./@required').to_s.downcase == 'true') }
 
     return ApiProfile.new(api, feature_api, api_family, min_version, target_version, extensions)
@@ -473,7 +473,7 @@ def load_profile_members(reg, profile)
     target_major, target_minor = profile.target_version.split('.').map(&:to_i)
 
     seen_vers = 0
-    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile.feature_api)
+    gl_feature_spec = reg.xpath('/registry/feature[@api="%s"]' % profile.feature_api)
     gl_feature_spec.each do |ver|
         feature_number = ver.xpath('@number').text
         feature_major, feature_minor = feature_number.split('.').map(&:to_i)
@@ -494,13 +494,13 @@ def load_profile_members(reg, profile)
             remove_secs = ver.xpath('./remove')
         end
 
-        require_types += require_secs.xpath('.//type/@name').map { |n| n.text }.flatten
-        require_enums += require_secs.xpath('.//enum/@name').map { |n| n.text }.flatten
-        require_procs += require_secs.xpath('.//command/@name').map { |n| n.text }.flatten
+        require_types += require_secs.xpath('./type/@name').map { |n| n.text }.flatten
+        require_enums += require_secs.xpath('./enum/@name').map { |n| n.text }.flatten
+        require_procs += require_secs.xpath('./command/@name').map { |n| n.text }.flatten
 
-        require_types -= remove_secs.xpath('.//type/@name').map { |n| n.text }.flatten
-        require_enums -= remove_secs.xpath('.//enum/@name').map { |n| n.text }.flatten
-        require_procs -= remove_secs.xpath('.//command/@name').map { |n| n.text }.flatten
+        require_types -= remove_secs.xpath('./type/@name').map { |n| n.text }.flatten
+        require_enums -= remove_secs.xpath('./enum/@name').map { |n| n.text }.flatten
+        require_procs -= remove_secs.xpath('./command/@name').map { |n| n.text }.flatten
     end
 
     if seen_vers == 0
@@ -510,21 +510,30 @@ def load_profile_members(reg, profile)
 
     ext_names = profile.extensions.map { |e| e.name }
 
-    reg.xpath('//registry//extensions//extension').each do |ext|
-        ext_name = ext.xpath('@name').text
-        next unless ext_names.include? ext_name
-
-        supported = ext.xpath('@supported').text
-        if supported != nil and not supported.split('|').include? profile.feature_api
-            raise "Extension #{ext_name} is not supported by the selected API (#{profile.feature_api})"
+    ext_names.each do |ext_name|
+        ext = reg.xpath("/registry/extensions/extension[@name='#{ext_name}']")
+        if ext == nil or ext.empty?
+            raise "Extension #{ext_name} could not be found"
         end
 
-        require_types += ext.xpath('.//require/type/@name').map { |n| n.text }.flatten
-        require_enums += ext.xpath('.//require/enum/@name').map { |n| n.text }.flatten
-        require_procs += ext.xpath('.//require//command/@name').map { |n| n.text }.flatten
-        require_types -= ext.xpath('.//remove//type/@name').map { |n| n.text }.flatten
-        require_enums -= ext.xpath('.//remove//enum/@name').map { |n| n.text }.flatten
-        require_procs -= ext.xpath('.//remove//command/@name').map { |n| n.text }.flatten
+        supported = ext.xpath('@supported').text
+        if supported != nil and not supported.split('|').include? profile.api
+            raise "Extension #{ext_name} is not supported by the selected API (#{profile.api})"
+        end
+
+        if profile.feature_api == FEATURE_API_GL
+            if profile.api == API_GL_CORE
+                require_secs = ext.xpath("./require[not(@api) or (@api='#{profile.feature_api}' and @profile='core')]")
+            else profile.api == API_GL
+                require_secs = ext.xpath("./require[not(@api) or (@api='#{profile.feature_api}' and @profile='compatibility')]")
+            end
+        else
+            require_secs = ext.css("./require[not(@api) or @api='#{profile.feature_api}']")
+        end
+
+        require_types += require_secs.xpath("./type/@name").map { |n| n.text }.flatten
+        require_enums += require_secs.xpath("./enum/@name").map { |n| n.text }.flatten
+        require_procs += require_secs.xpath("./command/@name").map { |n| n.text }.flatten
     end
 
     print "Finished discovering members for profile \"#{profile.api} #{profile.target_version}\""
@@ -544,7 +553,7 @@ def load_gl_defs(reg, profile, members)
     enums = []
     procs = []
 
-    gl_feature_spec = reg.xpath('//registry//feature[@api="%s"]' % profile.feature_api)
+    gl_feature_spec = reg.xpath('/registry/feature[@api="%s"]' % profile.feature_api)
     gl_feature_spec.each do |ver|
         feature_number = ver.xpath('@number').text
         feature_name = ver.xpath('@name').text
@@ -557,30 +566,30 @@ def load_gl_defs(reg, profile, members)
     extra_types = Set[]
 
     # discover commands first because they can implicitly require extra types
-    reg.xpath('//registry//commands//command').each do |cmd_root|
-        cmd_name = cmd_root.xpath('.//proto//name')
+    reg.xpath('/registry/commands/command').each do |cmd_root|
+        cmd_name = cmd_root.xpath('./proto/name')
 
         next unless req_procs.include? cmd_name.text
 
         name = cmd_name.text.strip
 
-        proto = cmd_root.xpath('.//proto')
+        proto = cmd_root.xpath('./proto')
         ret = parse_param_type proto.inner_html
         ret.gsub!(' *', '* ')
         ret.strip!
 
-        if ptype = proto.at_xpath('.//ptype')
+        if ptype = proto.at_xpath('./ptype')
             extra_types << ptype.text
         end
 
         params = []
 
-        cmd_root.xpath('.//param').each do |cmd_param|
-            if ptype = cmd_param.at_xpath('.//ptype')
+        cmd_root.xpath('./param').each do |cmd_param|
+            if ptype = cmd_param.at_xpath('./ptype')
                 extra_types << ptype.text
             end
 
-            param_name = cmd_param.xpath('.//name').text
+            param_name = cmd_param.xpath('./name').text
             param_type = parse_param_type cmd_param.inner_html
             param_type.gsub!(' *', '* ')
             param_type.strip!
@@ -596,12 +605,12 @@ def load_gl_defs(reg, profile, members)
 
     more_types = Set[]
 
-    reg.xpath('//registry//types/type').each do |type_root|
+    reg.xpath('/registry/types/type').each do |type_root|
         next if name_attr = type_root.at_xpath('./@name') and
             (name_attr.text == 'khrplatform' or
                 (profile.api_family == API_FAMILY_GL and name_attr.text == 'GLhandleARB'))
 
-        type_name = type_root.xpath('.//name').text
+        type_name = type_root.xpath('./name').text
         next unless req_types.include? type_name
         # bad idea to parse XML with regex, but this is extremely domain-specific
         type_typedef = type_root.to_s.gsub('<apientry/>', 'APIENTRY').gsub(/<.*?>/, '')
@@ -609,7 +618,7 @@ def load_gl_defs(reg, profile, members)
         types << ApiType.new(type_name, type_typedef)
     end
 
-    reg.xpath('//registry//enums/enum').each do |enum_root|
+    reg.xpath('/registry/enums/enum').each do |enum_root|
         enum_name = enum_root.xpath('./@name').text
         enum_group = enum_root.xpath('./@group').text
         enum_value = enum_root.xpath('./@value').text
