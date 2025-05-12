@@ -1,6 +1,6 @@
 [submodule "specs/OpenGL-Registry"]
 	path = specs/OpenGL-Registry
-	url = git@github.com:KhronosGroup/OpenGL-Registry.git
+	url = https://github.com/KhronosGroup/OpenGL-Registry.git
 [submodule "specs/EGL-Registry"]
 	path = specs/EGL-Registry
-	url = git@github.com:KhronosGroup/EGL-Registry.git
+	url = https://github.com/KhronosGroup/EGL-Registry.git
