@@ -454,10 +454,6 @@ def load_profile(profile_path)
     # spec, so it doesn't make sense to target both at once
     raise 'Minimum GLES version must be >= 2.0 when version 2/3 is targeted' if api == API_GLES and target_major >= 2 and min_major < 2
 
-    raise 'Target GL version must be >= 3.2 when core profile is specified' if api == API_GL_CORE and version_lt(target_major, target_minor, 3, 2)
-
-    raise 'Minimum GL version must be >= 3.2 when core profile is specified' if api == API_GL_CORE and version_lt(min_major, min_minor, 3, 2)
-
     extensions = profile.xpath('/profile/extensions/extension')
         .map { |e| ApiExtension.new(e.text, e.at_xpath('./@required').to_s.downcase == 'true') }
 
